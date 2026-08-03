@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ .Title }}</title>
+</head>
+<body>
+    <h1>{{ .Title }}</h1>
+    <main>
+        {{ range .Games }}
+        <a class="card" href="/games/{{ .Name }}">{{ .Title }}</a>
+        {{ end }}
+    </main>
+</body>
+</html>
