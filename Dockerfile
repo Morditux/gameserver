@@ -27,8 +27,7 @@ COPY --from=builder /gameserver /app/gameserver
 # Copie des fichiers statiques (html)
 COPY html/ /app/html/
 
-# Port d'écoute du serveur
-EXPOSE 8080
+# Pas d'EXPOSE : le serveur est derrière un reverse proxy sur le même réseau.
 
 # Exécution avec un utilisateur non-root
 USER 65532:65532

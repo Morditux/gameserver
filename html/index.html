@@ -3,10 +3,134 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gameserver</title>
+    <title>{{ .Title }}</title>
+    <style>
+        :root {
+            --bg: #0f1220;
+            --card: rgba(255, 255, 255, 0.05);
+            --card-border: rgba(255, 255, 255, 0.1);
+            --text: #e8eaf6;
+            --muted: #9aa0b4;
+            --accent: #7c5cff;
+            --accent-2: #00d4ff;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background:
+                radial-gradient(1200px 600px at 20% -10%, rgba(124, 92, 255, 0.25), transparent 60%),
+                radial-gradient(1000px 500px at 100% 0%, rgba(0, 212, 255, 0.18), transparent 55%),
+                var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            text-align: center;
+            padding: 3.5rem 1.5rem 2rem;
+        }
+
+        header h1 {
+            font-size: 2.6rem;
+            background: linear-gradient(90deg, var(--accent), var(--accent-2));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        header p {
+            color: var(--muted);
+            margin-top: 0.5rem;
+        }
+
+        main {
+            flex: 1;
+            max-width: 1100px;
+            margin: 0 auto;
+            width: 100%;
+            padding: 1rem 1.5rem 3rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 1.25rem;
+        }
+
+        .card {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 1.5rem;
+            padding: 1.5rem;
+            background: var(--card);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            text-decoration: none;
+            color: var(--text);
+            backdrop-filter: blur(8px);
+            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-6px);
+            border-color: var(--accent);
+            box-shadow: 0 12px 30px rgba(124, 92, 255, 0.25);
+        }
+
+        .card-title {
+            font-size: 1.15rem;
+            font-weight: 600;
+        }
+
+        .card-link {
+            color: var(--accent-2);
+            font-size: 0.9rem;
+        }
+
+        .empty {
+            text-align: center;
+            color: var(--muted);
+            padding: 3rem 0;
+        }
+
+        footer {
+            text-align: center;
+            padding: 1.5rem;
+            color: var(--muted);
+            font-size: 0.85rem;
+        }
+    </style>
 </head>
 <body>
-    <h1>Bienvenue sur le Gameserver</h1>
-    <p>Page d'accueil du serveur de jeu.</p>
+    <header>
+        <h1>🎮 Gameserver</h1>
+        <p>Index des jeux — mis à jour automatiquement</p>
+    </header>
+    <main>
+        {{ if .Games }}
+        <div class="grid">
+            {{ range .Games }}
+            <a class="card" href="/games/{{ .Name }}">
+                <span class="card-title">{{ .Title }}</span>
+                <span class="card-link">Jouer →</span>
+            </a>
+            {{ end }}
+        </div>
+        {{ else }}
+        <p class="empty">Aucun jeu disponible pour le moment.</p>
+        {{ end }}
+    </main>
+    <footer>
+        <p>Index généré dynamiquement depuis le dossier <code>html/games</code></p>
+    </footer>
 </body>
 </html>
