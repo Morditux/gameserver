@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="description" content="SNAKE — Le Serpent Gourmand : mange fruits et choppes de bière, à jouer au clavier ou au tactile."/>
+<title>Snake — Le Serpent Gourmand</title>
+<style>
+  * { box-sizing: border-box; }
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#04101f;
+    font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#eaf6ff;
+    overscroll-behavior:none;-webkit-user-select:none;user-select:none;}
+  canvas{display:block;touch-action:none;}
+
+  /* ---------- HUD ---------- */
+  #hud{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:26px;
+    padding:12px 18px;pointer-events:none;z-index:5;
+    background:linear-gradient(rgba(0,0,0,.55),transparent);}
+  #hud.hidden{display:none;}
+  #hud .stat{display:flex;flex-direction:column;gap:2px;}
+  #hud .label{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#7fb6e0;}
+  #hud .value{font-size:19px;font-weight:700;}
+  #invertWrap{margin-left:auto;display:flex;flex-direction:column;gap:4px;width:min(250px,46vw);
+    background:rgba(120,60,0,.35);border:1px solid #e8a33d;border-radius:10px;padding:6px 10px;
+    animation:pulse 1s infinite;}
+  #invertWrap.hidden{display:none;}
+  #invertWrap .lbl{font-size:11px;font-weight:700;color:#ffd08a;letter-spacing:1px;white-space:nowrap;}
+  #invertBar{height:8px;border-radius:5px;background:rgba(0,0,0,.4);overflow:hidden;}
+  #invertFill{height:100%;width:100%;background:linear-gradient(90deg,#ff8f00,#ffd54f);}
+  @keyframes pulse{50%{box-shadow:0 0 14px #ff9800aa;}}
+
+  /* ---------- Écrans ---------- */
+  .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:12px;background:radial-gradient(ellipse at center,rgba(4,14,28,.7),rgba(0,0,0,.93));
+    z-index:10;text-align:center;padding:22px;}
+  .overlay.hidden{display:none;}
+  .overlay h1{margin:0;font-size:clamp(34px,7vw,68px);letter-spacing:6px;color:#7ee8a0;
+    text-shadow:0 0 22px #2fe07a,0 0 60px #2fe07a66;}
+  .overlay.over h1{color:#ff5c5c;text-shadow:0 0 22px #ff3b3b,0 0 70px #d00;}
+  .overlay .sub{font-size:16px;color:#9fd6ff;letter-spacing:2px;margin:2px 0 6px;}
+  .overlay p{max-width:540px;line-height:1.7;color:#bcd8ef;font-size:14.5px;margin:2px 0;}
+  .overlay .scoreLine{font-size:22px;color:#ffe066;font-weight:700;}
+  .overlay .legend{display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;margin-top:4px;}
+  .overlay .chip{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.16);border-radius:20px;padding:5px 12px;font-size:13px;color:#d9ecff;}
+  .overlay kbd{background:#0d1b33;border:1px solid #3a5f8f;border-bottom-width:3px;border-radius:6px;
+    padding:2px 8px;font-family:inherit;font-size:12px;color:#cfe8ff;}
+  .overlay button{margin-top:12px;padding:14px 38px;font-size:17px;font-weight:700;letter-spacing:1px;
+    color:#031018;background:linear-gradient(180deg,#8af7b8,#2fd07a);border:none;border-radius:12px;
+    cursor:pointer;box-shadow:0 0 22px #2fd07a88;transition:transform .1s, box-shadow .1s;}
+  .overlay button:hover{transform:translateY(-2px);box-shadow:0 0 30px #2fd07acc;}
+  #pauseTag{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:6;font-size:40px;
+    font-weight:800;letter-spacing:8px;color:#fff;text-shadow:0 0 20px #000;pointer-events:none;
+    opacity:0;transition:opacity .15s;}
+  #pauseTag.on{opacity:.85;}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div class="stat"><span class="label">Score</span><span class="value" id="score">0</span></div>
+  <div class="stat"><span class="label">Record</span><span class="value" id="highscore">0</span></div>
+  <div class="stat"><span class="label">Vitesse</span><span class="value" id="level">1</span></div>
+  <div id="invertWrap" class="hidden">
+    <div class="lbl">🍺 Désorienté ! Directions inversées</div>
+    <div id="invertBar"><div id="invertFill"></div></div>
+  </div>
+</div>
+<div id="pauseTag">PAUSE</div>
+
+<div id="overlay" class="overlay">
+  <h1>SNAKE</h1>
+  <div class="sub">Le Serpent Gourmand</div>
+  <p></p>
+  <div class="legend">
+    <span class="chip">🍎 Pomme +10</span>
+    <span class="chip">🍌 Banane +20</span>
+    <span class="chip">🍓 Fraise +30</span>
+    <span class="chip">🍺 Choppe de bière : directions inversées 10 s</span>
+  </div>
+  <button id="startBtn">▶ Jouer</button>
+</div>
+
+<script>
+'use strict';
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const highEl = document.getElementById('highscore');
+  const levelEl = document.getElementById('level');
+  const hud = document.getElementById('hud');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const invertWrap = document.getElementById('invertWrap');
+  const invertFill = document.getElementById('invertFill');
+  const pauseTag = document.getElementById('pauseTag');
+
+  const GRID = 21;
+  const INVERT_DURATION = 10;   // secondes d'inversion
+  const BASE_SPEED = 150;       // ms par case
+  const MIN_SPEED = 65;
+
+  let dpr = Math.max(1, window.devicePixelRatio || 1);
+  let cell = 24, ox = 0, oy = 0;
+  let state = 'menu';           // menu | play | over
+  let paused = false;
+  let won = false;
+
+  // serpent
+  let snake = [], dir = {x:1,y:0}, nextDir = {x:1,y:0}, growing = 0;
+  // objets
+  let fruit = null, beer = null;
+  // timers
+  let speed = BASE_SPEED, acc = 0;
+  let invert = false, invertLeft = 0;
+  let gt = 0;                   // temps de jeu (fige pendant la pause)
+  let beerSpawnAt = 0, beerTimeout = 0;
+  let score = 0;
+  let highScore = +(localStorage.getItem('snakeHigh') || 0);
+  let lastTime = 0;
+  let touchStartXY = null;
+
+  highEl.textContent = highScore;
+
+  // ---------- Types de fruits ----------
+  const FRUITS = [
+    { id:'pomme',   label:'Pomme',   pts:10, draw: drawApple },
+    { id:'banane',  label:'Banane',  pts:20, draw: drawBanana },
+    { id:'fraise',  label:'Fraise',  pts:30, draw: drawStrawberry },
+  ];
+
+  // ---------- Mise en page ----------
+  function layout(){
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    const w = innerWidth, h = innerHeight;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cell = Math.floor(Math.min(w / GRID, h / GRID));
+    ox = Math.floor((w - cell * GRID) / 2);
+    oy = Math.floor((h - cell * GRID) / 2);
+  }
+  window.addEventListener('resize', layout);
+
+  // ---------- État du jeu ----------
+  function reset(){
+    snake = [{x:10,y:10},{x:9,y:10},{x:8,y:10}];
+    dir = {x:1,y:0}; nextDir = {x:1,y:0};
+    growing = 0;
+    speed = BASE_SPEED; acc = 0;
+    score = 0; won = false;
+    invert = false; invertLeft = 0;
+    fruit = null; beer = null;
+    spawnFruit();
+    scheduleBeer();
+    updateHud();
+  }
+
+  function start(){
+    reset();
+    state = 'play';
+    paused = false;
+    hud.classList.remove('hidden');
+    overlay.classList.add('hidden');
+    pauseTag.classList.remove('on');
+    lastTime = performance.now();
+  }
+
+  function gameOver(){
+    state = 'over';
+    if (score > highScore){ highScore = score; localStorage.setItem('snakeHigh', highScore); }
+    beep('over');
+    showOverlay();
+  }
+
+  function showOverlay(){
+    hud.classList.add('hidden');
+    overlay.classList.remove('hidden');
+    const h1 = overlay.querySelector('h1');
+    const sub = overlay.querySelector('.sub');
+    const p = overlay.querySelector('p');
+    const legend = overlay.querySelector('.legend');
+    if (state === 'over'){
+      overlay.classList.add('over');
+      h1.textContent = won ? 'VICTOIRE !' : 'GAME OVER';
+      sub.textContent = '';
+      legend.style.display = 'none';
+      p.innerHTML = (won ? 'Incroyable, tu as rempli tout le plateau !<br/>' : 'Le serpent s\'est mordu la queue…<br/>') +
+        '<span class="scoreLine">Score : ' + score +
+        (score > 0 && score >= highScore ? ' — 🏆 Nouveau record !' : ' — Record : ' + highScore) + '</span>';
+      startBtn.textContent = '↻ Rejouer';
+    } else {
+      overlay.classList.remove('over');
+      h1.textContent = 'SNAKE';
+      sub.textContent = 'Le Serpent Gourmand';
+      legend.style.display = '';
+      p.innerHTML = 'Dirige le serpent avec les <b>flèches</b> ou <kbd>Z Q S D</kbd> (AZERTY) sur ordinateur.<br/>' +
+        'Sur mobile / tablette, <b>glisse le doigt</b> sur l\'écran dans la direction voulue.';
+      startBtn.textContent = '▶ Jouer';
+    }
+  }
+
+  // ---------- Case libre ----------
+  function freeCell(){
+    const taken = new Set();
+    for (const s of snake) taken.add(s.x + ',' + s.y);
+    if (fruit) taken.add(fruit.x + ',' + fruit.y);
+    if (beer) taken.add(beer.x + ',' + beer.y);
+    const free = [];
+    for (let y = 0; y < GRID; y++)
+      for (let x = 0; x < GRID; x++)
+        if (!taken.has(x + ',' + y)) free.push({x:x, y:y});
+    if (!free.length) return null;
+    return free[Math.floor(Math.random() * free.length)];
+  }
+
+  function spawnFruit(){
+    const c = freeCell();
+    if (!c) return;
+    const f = FRUITS[Math.floor(Math.random() * FRUITS.length)];
+    fruit = { x:c.x, y:c.y, pts:f.pts, draw:f.draw, id:f.id };
+  }
+
+  function scheduleBeer(){
+    beerSpawnAt = gt + (10000 + Math.random() * 9000);   // 10 à 19 s
+  }
+
+  function spawnBeer(){
+    const c = freeCell();
+    if (!c) return;
+    beer = { x:c.x, y:c.y };
+    beerTimeout = gt + 8000;                              // disparaît après 8 s
+  }
+
+  // ---------- Direction ----------
+  function setDirection(dx, dy){
+    if (state !== 'play' || paused) return;
+    if (invert){ dx = -dx; dy = -dy; }                    // bière : inversion
+    if ((dx === -dir.x && dy === -dir.y) || (dx === dir.x && dy === dir.y)) return;
+    nextDir = {x:dx, y:dy};
+  }
+
+  function togglePause(){
+    if (state !== 'play') return;
+    paused = !paused;
+    pauseTag.classList.toggle('on', paused);
+    lastTime = performance.now();
+  }
+
+  function onKey(e){
+    const k = e.key;
+    let dx = 0, dy = 0;
+    if (k === 'ArrowUp' || k === 'w' || k === 'W' || k === 'z' || k === 'Z') dy = -1;
+    else if (k === 'ArrowDown' || k === 's' || k === 'S') dy = 1;
+    else if (k === 'ArrowLeft' || k === 'a' || k === 'A' || k === 'q' || k === 'Q') dx = -1;
+    else if (k === 'ArrowRight' || k === 'd' || k === 'D') dx = 1;
+
+    if (dx || dy){
+      e.preventDefault();
+      if (state !== 'play') start();
+      else setDirection(dx, dy);
+      return;
+    }
+    if (k === ' ' || k === 'Spacebar'){
+      e.preventDefault();
+      if (state === 'play') togglePause();
+      else start();
+      return;
+    }
+    if (k === 'p' || k === 'P' || k === 'Escape'){
+      if (state === 'play') togglePause();
+      return;
+    }
+    if (k === 'Enter' && state !== 'play') start();
+  }
+  document.addEventListener('keydown', onKey);
+
+  // ---------- Tactile ----------
+  function onTouchStart(e){
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    touchStartXY = {x:t.clientX, y:t.clientY};
+  }
+  function onTouchEnd(e){
+    if (!touchStartXY) return;
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStartXY.x;
+    const dy = t.clientY - touchStartXY.y;
+    touchStartXY = null;
+    if (Math.abs(dx) < 24 && Math.abs(dy) < 24) return;   // simple tap ignoré
+    if (Math.abs(dx) > Math.abs(dy)) setDirection(Math.sign(dx), 0);
+    else setDirection(0, Math.sign(dy));
+  }
+  canvas.addEventListener('touchstart', onTouchStart, {passive:false});
+  canvas.addEventListener('touchend', onTouchEnd, {passive:false});
+
+  // ---------- Tick de déplacement ----------
+  function tick(){
+    dir = nextDir;
+    const head = {x:snake[0].x, y:snake[0].y};
+    head.x = (head.x + dir.x + GRID) % GRID;              // passage de bord
+    head.y = (head.y + dir.y + GRID) % GRID;
+
+    const checkLen = growing > 0 ? snake.length : snake.length - 1;
+    for (let i = 0; i < checkLen; i++){
+      if (snake[i].x === head.x && snake[i].y === head.y){ gameOver(); return; }
+    }
+
+    snake.unshift(head);
+    if (growing > 0) growing--;
+    else snake.pop();
+
+    // fruit
+    if (fruit && head.x === fruit.x && head.y === fruit.y){
+      score += fruit.pts;
+      growing++;
+      speed = Math.max(MIN_SPEED, speed - 3);
+      beep('eat');
+      spawnFruit();
+      if (!beer && gt > beerSpawnAt) spawnBeer();
+      if (snake.length >= GRID * GRID){ won = true; gameOver(); return; }
+    }
+
+    // choppe de bière
+    if (beer && head.x === beer.x && head.y === beer.y){
+      invert = true;
+      invertLeft = INVERT_DURATION;
+      beer = null;
+      score += 5;
+      beep('beer');
+      scheduleBeer();
+    }
+  }
+
+  // ---------- Boucle ----------
+  function loop(now){
+    requestAnimationFrame(loop);
+    const dt = Math.min(100, now - lastTime);
+    lastTime = now;
+
+    if (state === 'play' && !paused){
+      gt += dt;
+
+      if (invert){
+        invertLeft -= dt / 1000;
+        if (invertLeft <= 0){ invert = false; invertLeft = 0; }
+      }
+      if (beer && gt > beerTimeout) beer = null;
+      if (!beer && gt > beerSpawnAt) spawnBeer();
+
+      acc += dt;
+      while (acc >= speed){
+        acc -= speed;
+        tick();
+        if (state !== 'play') break;
+      }
+    }
+    updateHud();
+    draw(now);
+  }
+
+  function updateHud(){
+    scoreEl.textContent = score;
+    levelEl.textContent = Math.floor((BASE_SPEED - speed) / 3) + 1;
+    if (invert){
+      invertWrap.classList.remove('hidden');
+      invertFill.style.width = Math.max(0, invertLeft / INVERT_DURATION * 100) + '%';
+    } else {
+      invertWrap.classList.add('hidden');
+    }
+  }
+
+  // ---------- Dessin ----------
+  function draw(now){
+    // fond
+    const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    bg.addColorStop(0, '#050e1c');
+    bg.addColorStop(1, '#0a1f33');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, innerWidth, innerHeight);
+
+    // grille discrète
+    ctx.strokeStyle = 'rgba(120,190,255,0.06)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i <= GRID; i++){
+      ctx.moveTo(ox + i * cell, oy); ctx.lineTo(ox + i * cell, oy + GRID * cell);
+      ctx.moveTo(ox, oy + i * cell); ctx.lineTo(ox + GRID * cell, oy + i * cell);
+    }
+    ctx.stroke();
+
+    // bordure
+    ctx.strokeStyle = 'rgba(126,232,160,0.5)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(ox - 1, oy - 1, GRID * cell + 2, GRID * cell + 2);
+
+    // objets
+    if (beer) drawBeer(ctx, ox + beer.x * cell + cell / 2, oy + beer.y * cell + cell / 2, cell);
+    if (fruit) fruit.draw(ctx, ox + fruit.x * cell + cell / 2, oy + fruit.y * cell + cell / 2, cell);
+
+    // serpent
+    drawSnake(now);
+
+    // halo ambré si bière active
+    if (invert && state === 'play' && snake.length){
+      const hx = ox + snake[0].x * cell + cell / 2;
+      const hy = oy + snake[0].y * cell + cell / 2;
+      const glow = ctx.createRadialGradient(hx, hy, cell * 0.3, hx, hy, cell * 3.2);
+      glow.addColorStop(0, 'rgba(255,160,0,0.28)');
+      glow.addColorStop(1, 'rgba(255,160,0,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(hx - cell * 3.2, hy - cell * 3.2, cell * 6.4, cell * 6.4);
+    }
+  }
+
+  function drawSnake(now){
+    const n = snake.length;
+    if (!n) return;
+    for (let i = n - 1; i >= 0; i--){
+      const s = snake[i];
+      const cx = ox + s.x * cell + cell / 2;
+      const cy = oy + s.y * cell + cell / 2;
+      const t = i / Math.max(1, n - 1);
+      const r = cell * 0.42 * (1 - t * 0.28);
+      const g = ctx.createRadialGradient(cx - r * 0.4, cy - r * 0.4, r * 0.15, cx, cy, r);
+      if (invert && i === 0){ g.addColorStop(0, '#ffe08a'); g.addColorStop(1, '#e8930a'); }
+      else { g.addColorStop(0, '#9ff7c2'); g.addColorStop(1, i === 0 ? '#2fd07a' : '#159a52'); }
+      ctx.fillStyle = g;
+      const rr = r;
+      ctx.beginPath();
+      ctx.moveTo(cx + rr, cy - rr * 0.6);
+      ctx.quadraticCurveTo(cx + rr, cy + rr, cx + rr * 0.6, cy + rr);
+      ctx.lineTo(cx - rr * 0.6, cy + rr);
+      ctx.quadraticCurveTo(cx - rr, cy + rr, cx - rr, cy + rr * 0.6);
+      ctx.lineTo(cx - rr, cy - rr * 0.6);
+      ctx.quadraticCurveTo(cx - rr, cy - rr, cx - rr * 0.6, cy - rr);
+      ctx.lineTo(cx + rr * 0.6, cy - rr);
+      ctx.quadraticCurveTo(cx + rr, cy - rr, cx + rr, cy - rr * 0.6);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // yeux sur la tête
+    const hx = ox + snake[0].x * cell + cell / 2;
+    const hy = oy + snake[0].y * cell + cell / 2;
+    const r = cell * 0.2;
+    const px = -dir.y, py = dir.x;
+    const ex1 = hx + dir.x * r + px * r * 0.7, ey1 = hy + dir.y * r + py * r * 0.7;
+    const ex2 = hx + dir.x * r - px * r * 0.7, ey2 = hy + dir.y * r - py * r * 0.7;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(ex1, ey1, r * 0.55, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(ex2, ey2, r * 0.55, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#04220f';
+    ctx.beginPath(); ctx.arc(ex1 + dir.x * r * 0.2, ey1 + dir.y * r * 0.2, r * 0.26, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(ex2 + dir.x * r * 0.2, ey2 + dir.y * r * 0.2, r * 0.26, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // ---------- Fruits ----------
+  function drawApple(ctx, cx, cy, s){
+    const r = s * 0.34;
+    const g = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.1, cx, cy + s * 0.05, r);
+    g.addColorStop(0, '#ff7b7b');
+    g.addColorStop(1, '#c62828');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(cx - s * 0.12, cy + s * 0.06, r, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + s * 0.12, cy + s * 0.06, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.beginPath(); ctx.arc(cx - r * 0.35, cy - r * 0.35, r * 0.16, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#6d4c41';
+    ctx.lineWidth = Math.max(1, s * 0.05);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - s * 0.02);
+    ctx.quadraticCurveTo(cx + s * 0.02, cy - r * 0.7, cx + s * 0.12, cy - r * 0.9);
+    ctx.stroke();
+    ctx.fillStyle = '#43a047';
+    ctx.beginPath();
+    ctx.ellipse(cx + s * 0.2, cy - r * 0.72, s * 0.16, s * 0.07, -0.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawBanana(ctx, cx, cy, s){
+    const r = s * 0.34;
+    const g = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+    g.addColorStop(0, '#fff176');
+    g.addColorStop(0.5, '#ffd54f');
+    g.addColorStop(1, '#f9a825');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(cx - r * 0.6, cy + r * 0.55);
+    ctx.quadraticCurveTo(cx - r * 1.1, cy - r * 0.2, cx - r * 0.2, cy - r * 0.7);
+    ctx.quadraticCurveTo(cx + r * 0.55, cy - r * 1.05, cx + r * 0.95, cy - r * 0.3);
+    ctx.quadraticCurveTo(cx + r * 1.2, cy + r * 0.1, cx + r * 0.5, cy + r * 0.6);
+    ctx.quadraticCurveTo(cx + r * 0.1, cy + r * 0.95, cx - r * 0.6, cy + r * 0.55);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#8d6e63';
+    ctx.beginPath(); ctx.arc(cx + r * 0.92, cy - r * 0.42, r * 0.12, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx - r * 0.5, cy + r * 0.52, r * 0.1, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawStrawberry(ctx, cx, cy, s){
+    const w = s * 0.36, h = s * 0.44;
+    const g = ctx.createRadialGradient(cx - w * 0.3, cy - h * 0.3, w * 0.1, cx, cy, w * 1.1);
+    g.addColorStop(0, '#ff8a9e');
+    g.addColorStop(1, '#e91e63');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + h);
+    ctx.bezierCurveTo(cx - w * 1.25, cy + h * 0.15, cx - w * 0.65, cy - h * 0.5, cx, cy - h * 0.25);
+    ctx.bezierCurveTo(cx + w * 0.65, cy - h * 0.5, cx + w * 1.25, cy + h * 0.15, cx, cy + h);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    const seeds = [[-0.35,0.25],[-0.1,0.15],[0.15,0.25],[0.35,0.1],[-0.2,0.45],[0.05,0.5],[0.25,0.42],[0,0.7],[-0.15,0.6],[-0.35,0.55]];
+    for (const sd of seeds){
+      ctx.beginPath();
+      ctx.arc(cx + sd[0] * w, cy + sd[1] * h, Math.max(1, s * 0.035), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#2e7d32';
+    ctx.beginPath();
+    for (let i = 0; i < 5; i++){
+      const a = -Math.PI / 2 + (i - 2) * 0.5;
+      const lx  = cx + Math.cos(a) * w * 0.7,     ly  = cy - h * 0.45 + Math.sin(a) * h * 0.4;
+      const lx2 = cx + Math.cos(a + 0.22) * w * 0.5, ly2 = cy - h * 0.5 + Math.sin(a + 0.22) * h * 0.28;
+      ctx.moveTo(cx, cy - h * 0.4);
+      ctx.lineTo(lx, ly);
+      ctx.lineTo(lx2, ly2);
+      ctx.closePath();
+    }
+    ctx.fill();
+    ctx.strokeStyle = '#2e7d32';
+    ctx.lineWidth = Math.max(1, s * 0.05);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - h * 0.5);
+    ctx.lineTo(cx + s * 0.02, cy - h * 0.72);
+    ctx.stroke();
+  }
+
+  // ---------- Choppe de bière ----------
+  function drawBeer(ctx, cx, cy, s){
+    const w = s * 0.5, h = s * 0.46;
+    const x = cx - w / 2, y = cy - h / 2 + s * 0.08;
+    // anse
+    ctx.strokeStyle = '#b26a00';
+    ctx.lineWidth = Math.max(1.5, s * 0.07);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx + w / 2, cy + s * 0.02, s * 0.16, -Math.PI / 2, Math.PI / 2);
+    ctx.stroke();
+    // corps
+    const g = ctx.createLinearGradient(x, 0, x + w, 0);
+    g.addColorStop(0, '#ffca28');
+    g.addColorStop(0.5, '#ffb300');
+    g.addColorStop(1, '#f57f17');
+    ctx.fillStyle = g;
+    ctx.fillRect(x, y, w, h);
+    // mousse
+    ctx.fillStyle = '#fff3e0';
+    ctx.fillRect(x, y - s * 0.03, w, s * 0.06);
+    ctx.beginPath(); ctx.arc(cx - w * 0.25, y - s * 0.02, s * 0.13, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, y - s * 0.05, s * 0.16, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + w * 0.25, y - s * 0.02, s * 0.13, 0, Math.PI * 2); ctx.fill();
+    // reflet
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillRect(x + s * 0.07, y + s * 0.1, s * 0.05, h * 0.5);
+  }
+
+  // ---------- Audio (petits bips) ----------
+  let actx = null;
+  function ensureAudio(){
+    try{
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume();
+    }catch(e){}
+  }
+  function beep(kind){
+    try{
+      ensureAudio();
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'sine';
+      if (kind === 'eat') o.frequency.value = 620;
+      else if (kind === 'beer') o.frequency.value = 260;
+      else o.frequency.value = 140;
+      g.gain.setValueAtTime(0.12, actx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + 0.18);
+      o.connect(g).connect(actx.destination);
+      o.start();
+      o.stop(actx.currentTime + 0.2);
+    }catch(e){}
+  }
+
+  // ---------- Événements ----------
+  startBtn.addEventListener('click', function(){ ensureAudio(); start(); });
+  document.addEventListener('pointerdown', ensureAudio, {once:true});
+
+  // ---------- Init ----------
+  layout();
+  highEl.textContent = highScore;
+  showOverlay();
+  requestAnimationFrame(function(now){ lastTime = now; requestAnimationFrame(loop); });
+})();
+</script>
+</body>
+</html>
