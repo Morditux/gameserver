@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Chasseur Stellaire — Combat Spatial</title>
+<style>
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#02030a;
+    font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#eaf6ff;}
+  canvas{display:block;cursor:crosshair;}
+
+  /* ---------- HUD ---------- */
+  #hud{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:28px;
+    padding:12px 18px;pointer-events:none;z-index:5;
+    background:linear-gradient(rgba(0,0,0,.55),transparent);}
+  #hud.hidden{display:none;}
+  #hud .stat{display:flex;flex-direction:column;gap:2px;}
+  #hud .label{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#7fb6e0;}
+  #hud .value{font-size:18px;font-weight:700;}
+  #lifeWrap{flex:0 0 240px;}
+  #lifeBar{height:10px;border-radius:6px;background:rgba(255,255,255,.12);overflow:hidden;margin-top:4px;}
+  #lifeFill{height:100%;width:100%;border-radius:6px;background:linear-gradient(90deg,#39d353,#4ae);
+    transition:width .15s linear, background .3s;}
+  #lifePct{font-size:12px;color:#9fd6ff;}
+  #missileBar{height:5px;width:130px;border-radius:4px;background:rgba(255,255,255,.12);overflow:hidden;margin-top:3px;}
+  #missileFill{height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#ffb347,#ff7b3d);
+    transition:width .1s linear;}
+  #miniBar{height:5px;width:130px;border-radius:4px;background:rgba(255,255,255,.12);overflow:hidden;margin-top:3px;}
+  #miniFill{height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#b48cff,#6a5cff);
+    transition:width .1s linear;}
+  #blastBar{height:5px;width:130px;border-radius:4px;background:rgba(255,255,255,.12);overflow:hidden;margin-top:3px;}
+  #blastFill{height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#9fd8ff,#3a7bff);
+    transition:width .1s linear;}
+  #shieldBar{height:5px;width:130px;border-radius:4px;background:rgba(255,255,255,.12);overflow:hidden;margin-top:3px;}
+  #shieldFill{height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6fd8ff,#2f7bff);
+    transition:width .1s linear;}
+
+  #mute{position:fixed;bottom:14px;right:14px;z-index:6;background:rgba(255,255,255,.08);
+    border:1px solid rgba(255,255,255,.25);color:#eaf6ff;border-radius:10px;
+    padding:8px 12px;cursor:pointer;font-size:16px;}
+  #mute:hover{background:rgba(255,255,255,.18);}
+
+  /* ---------- Écrans ---------- */
+  .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;background:radial-gradient(ellipse at center,rgba(4,10,28,.72),rgba(0,0,0,.92));
+    z-index:10;text-align:center;padding:24px;}
+  .overlay.hidden{display:none;}
+  .overlay h1{font-size:clamp(30px,6vw,62px);letter-spacing:6px;margin:0;
+    text-shadow:0 0 24px #4ae,0 0 60px #4ae8;}
+  .overlay.win h1{color:#ffe066;text-shadow:0 0 24px #ffcc00,0 0 70px #ff9900;}
+  .overlay.over h1{color:#ff5c5c;text-shadow:0 0 24px #ff3b3b,0 0 70px #d00;}
+  .overlay p{max-width:560px;line-height:1.65;color:#bcd8ef;font-size:15px;margin:4px 0;}
+  .overlay .scoreLine{font-size:22px;color:#ffe066;font-weight:700;}
+  .overlay .keys{display:inline-flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;color:#cfe8ff;}
+  .overlay kbd{background:#0d1b33;border:1px solid #3a5f8f;border-bottom-width:3px;border-radius:6px;
+    padding:3px 9px;font-family:inherit;font-size:13px;color:#cfe8ff;}
+  .overlay button{margin-top:10px;padding:13px 34px;font-size:17px;font-weight:700;letter-spacing:1px;
+    color:#031018;background:linear-gradient(180deg,#7ee8ff,#2fa8ff);border:none;border-radius:12px;
+    cursor:pointer;box-shadow:0 0 22px #2fa8ff88;transition:transform .1s, box-shadow .1s;}
+  .overlay button:hover{transform:translateY(-2px);box-shadow:0 0 30px #2fa8ffcc;}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div class="stat"><span class="label">Score</span><span class="value" id="score">0</span></div>
+  <div class="stat" id="lifeWrap">
+    <span class="label">Intégrité de l'avion</span>
+    <div id="lifeBar"><div id="lifeFill"></div></div>
+    <span id="lifePct">100 %</span>
+  </div>
+  <div class="stat"><span class="label">Vaisseaux détruits</span><span class="value" id="destroyed">0 / 60</span></div>
+  <div class="stat"><span class="label">Missile tête chercheuse (C)</span><span class="value" id="missile">Prêt</span><div id="missileBar"><div id="missileFill"></div></div></div>
+  <div class="stat"><span class="label">Mini lasers (X)</span><span class="value" id="mini">Prêt</span><div id="miniBar"><div id="miniFill"></div></div></div>
+  <div class="stat"><span class="label">Explosion (V)</span><span class="value" id="blast">Prêt</span><div id="blastBar"><div id="blastFill"></div></div></div>
+  <div class="stat"><span class="label">Bouclier (25 s)</span><span class="value" id="shield">Inactif</span><div id="shieldBar"><div id="shieldFill"></div></div></div>
+</div>
+
+<!-- Menu -->
+<div id="menu" class="overlay">
+  <h1>CHASSEUR STELLAIRE</h1>
+  <p>Les vaisseaux aliens envahissent le secteur — ils arrivent de <strong>tous les côtés</strong> et tirent des lasers.</p>
+  <p>Détruis les <strong>60 vaisseaux</strong> (10 au maximum en même temps) pour remporter la victoire.
+     Chaque vaisseau détruit rapporte <strong>5 points</strong>.</p>
+  <div class="keys"><kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> se déplacer &nbsp;·&nbsp; <kbd>Espace</kbd> tirer &nbsp;·&nbsp; <kbd>C</kbd> missile tête chercheuse &nbsp;·&nbsp; <kbd>X</kbd> mini lasers &nbsp;·&nbsp; <kbd>V</kbd> explosion anti-tirs</div>
+  <p style="font-size:13px;color:#8fb2d4;">Un laser ennemi coûte 5 % d'intégrité. Deux tirs de tes lasers suffisent à abattre un vaisseau. Le missile (touche <kbd>C</kbd>) détruit un vaisseau en un seul tir, mais met 2 secondes à se recharger. Les mini lasers (touche <kbd>X</kbd>) détruisent les tirs ennemis : 6 lasers toutes les 4 secondes. L'explosion (touche <kbd>V</kbd>) détruit tous les tirs ennemis dans un rayon de 10 fois le vaisseau, toutes les 10 secondes. Des symboles de réparation (croix verte) et de bouclier (25 s d'invulnérabilité) traversent l'écran : ramasse-les avec l'avion. Une fois les 60 vaisseaux détruits, le VAISSEAU MÈRE (boss) apparaît : il tire des lasers et des missiles non guidés. Pendant ce combat, la touche <kbd>C</kbd> lance 3 missiles à tête chercheuse — chacun retire 2 % de vie au boss.</p>
+  <button id="startBtn">▶ Commencer la partie</button>
+</div>
+
+<!-- Victoire -->
+<div id="win" class="overlay win hidden">
+  <h1>VICTOIRE !</h1>
+  <p>Le vaisseau mère est détruit. Le secteur est de nouveau sûr.</p>
+  <div class="scoreLine">Score final : <span id="winScore">0</span> points</div>
+  <button id="winBtn">↻ Rejouer</button>
+</div>
+
+<!-- Défaite -->
+<div id="over" class="overlay over hidden">
+  <h1>AVION DÉTRUIT</h1>
+  <p>Ton vaisseau est tombé au combat…</p>
+  <div class="scoreLine">Score : <span id="overScore">0</span> points</div>
+  <button id="overBtn">↻ Réessayer</button>
+</div>
+
+<button id="mute" title="Couper / activer le son">🔊</button>
+
+<script>
+"use strict";
+
+/* ============================================================
+   Chasseur Stellaire — jeu de combat spatial 2D
+   Déplacement : flèches (ou ZQSD/WASD) · Tir : Espace
+   ============================================================ */
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const $ = id => document.getElementById(id);
+const hud = $('hud'), scoreEl = $('score'), lifeFill = $('lifeFill'),
+      lifePctEl = $('lifePct'), destroyedEl = $('destroyed');
+const menu = $('menu'), win = $('win'), over = $('over'),
+      winScore = $('winScore'), overScore = $('overScore');
+const startBtn = $('startBtn'), winBtn = $('winBtn'), overBtn = $('overBtn'), muteBtn = $('mute');
+const missileEl = $('missile'), missileFill = $('missileFill');
+const miniEl = $('mini'), miniFill = $('miniFill');
+const blastEl = $('blast'), blastFill = $('blastFill');
+const shieldEl = $('shield'), shieldFill = $('shieldFill');
+
+let W = 0, H = 0;
+function resize(){ W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; makeStars(); }
+window.addEventListener('resize', resize);
+// NB : le premier appel de resize() est fait à la fin du script, une fois `G` déclaré
+
+/* ---------------- Audio (WebAudio, activé au premier geste) ---------------- */
+let AC = null, muted = false;
+function ensureAudio(){
+  try{
+    if(!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+    if(AC.state === 'suspended') AC.resume();
+  }catch(e){}
+}
+function tone(f0, f1, dur, type, vol){
+  if(muted) return;
+  try{
+    ensureAudio();
+    const t = AC.currentTime;
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  }catch(e){}
+}
+const sfx = {
+  shoot   : () => tone(880, 220, 0.08, 'square',  0.05),
+  missile : () => tone(500, 950, 0.18, 'sawtooth', 0.06),
+  mini    : () => tone(1400, 700, 0.07, 'triangle', 0.05),
+  pop     : () => tone(2200, 1000, 0.05, 'sine', 0.06),
+  blast   : () => { tone(200, 40, 0.45, 'sawtooth', 0.15); tone(90, 30, 0.5, 'sine', 0.20); },
+  pickup  : () => tone(660, 990, 0.12, 'sine', 0.07),
+  boss    : () => { tone(80, 40, 0.8, 'sawtooth', 0.18); tone(60, 30, 1.0, 'sine', 0.18); },
+  bmissile: () => tone(200, 120, 0.2, 'sawtooth', 0.08),
+  blue    : () => tone(320, 140, 0.25, 'sawtooth', 0.10),
+  shielddown: () => tone(220, 50, 0.4, 'sawtooth', 0.12),
+  shield  : () => tone(440, 660, 0.15, 'sine', 0.08),
+  eshoot: () => tone(320, 110, 0.12, 'sawtooth',0.04),
+  hit   : () => tone(140, 70,  0.18, 'square',  0.10),
+  boom  : () => tone(240, 40,  0.45, 'triangle',0.16),
+  win   : () => { tone(523,523,0.12,'square',0.08); setTimeout(()=>tone(659,659,0.12,'square',0.08),130);
+                  setTimeout(()=>tone(784,784,0.18,'square',0.08),260); },
+  lose  : () => { tone(300,150,0.3,'sawtooth',0.12); setTimeout(()=>tone(150,60,0.5,'sawtooth',0.12),280); }
+};
+
+/* ---------------- Constantes de jeu ---------------- */
+const TOTAL       = 60;   // vaisseaux en tout
+const MAX_ALIVE   = 10;   // vaisseaux max simultanés
+const KILL_POINTS = 5;    // points par vaisseau détruit
+const ENEMY_LIFE  = 100;  // vie d'un vaisseau alien (2 tirs = -50 % × 2)
+const PLAYER_LIFE = 100;  // vie de l'avion (chaque laser ennemi : -5 %)
+const SHOT_DAMAGE = ENEMY_LIFE / 2;
+const SHIP_R   = 24;            // demi-largeur du vaisseau (base du rayon de l'explosion)
+const BLAST_R  = SHIP_R * 10;   // rayon de l'explosion : 10 × le vaisseau
+const BLAST_CD = 10;            // recharge de l'explosion (secondes)
+const SHIELD_TIME = 25;         // durée du bouclier (secondes)
+const SHIELD_R    = 34;         // rayon du bouclier (détruit les tirs ennemis)
+const ITEM_R      = 16;         // rayon des objets à ramasser
+
+/* ---------------- État du jeu ---------------- */
+const G = {
+  state: 'menu',          // menu | play | won | over
+  score: 0, destroyed: 0, time: 0, spawnTimer: 0, itemTimer: 4, boss: null,
+  stars: [], bullets: [], ebullets: [], missiles: [], miniLasers: [], enemies: [], parts: [], blasts: [], items: [],
+  player: { x:0, y:0, vx:0, vy:0, angle:0, life:PLAYER_LIFE, inv:0, shootCd:0, missCd:0, miniCd:0, blastCd:0, shieldT:0 }
+};
+
+/* ---------------- Champ d'étoiles ---------------- */
+function makeStars(){
+  G.stars = [];
+  const n = Math.min(400, Math.floor(W * H / 1500));
+  for(let i = 0; i < n; i++){
+    G.stars.push({
+      x: Math.random() * W, y: Math.random() * H,
+      z: 0.3 + Math.random() * 0.7,          // profondeur (parallaxe)
+      s: 20 + Math.random() * 90,            // vitesse de défilement (px/s)
+      tw: Math.random() * Math.PI * 2        // phase de scintillement
+    });
+  }
+}
+
+function updateStars(dt){
+  const p = G.player;
+  for(const st of G.stars){
+    // les étoiles défilent vers le bas et glissent à l'opposé du déplacement
+    st.x -= p.vx * 0.25 * st.z * dt;
+    st.y += st.s * st.z * dt - p.vy * 0.25 * st.z * dt;
+    if(st.x < -2) st.x = W + 2; else if(st.x > W + 2) st.x = -2;
+    if(st.y < -2) st.y = H + 2; else if(st.y > H + 2) st.y = -2;
+  }
+}
+
+function drawStars(){
+  for(const st of G.stars){
+    ctx.globalAlpha = (0.25 + 0.75 * Math.abs(Math.sin(G.time * 2 + st.tw))) * (0.35 + 0.65 * st.z);
+    ctx.fillStyle = '#ffffff';
+    const s = st.z * 2.2;
+    ctx.fillRect(st.x, st.y, s, s);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------------- Particules (explosions) ---------------- */
+function explode(x, y, color, n, speed){
+  for(let i = 0; i < n; i++){
+    const a = Math.random() * Math.PI * 2, sp = speed * (0.3 + Math.random() * 0.7);
+    G.parts.push({
+      x, y,
+      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+      life: 0.4 + Math.random() * 0.5, max: 0.9,
+      size: 1.5 + Math.random() * 3, color
+    });
+  }
+}
+
+function updateParts(dt){
+  for(let i = G.parts.length - 1; i >= 0; i--){
+    const pt = G.parts[i];
+    pt.life -= dt;
+    if(pt.life <= 0){ G.parts.splice(i, 1); continue; }
+    pt.x += pt.vx * dt; pt.y += pt.vy * dt;
+    const f = Math.max(0, 1 - 3 * dt);
+    pt.vx *= f; pt.vy *= f;
+  }
+}
+
+function drawParts(){
+  for(const pt of G.parts){
+    ctx.globalAlpha = Math.max(0, pt.life / pt.max);
+    ctx.fillStyle = pt.color;
+    ctx.fillRect(pt.x - pt.size / 2, pt.y - pt.size / 2, pt.size, pt.size);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------------- Joueur ---------------- */
+function updatePlayer(dt){
+  const p = G.player;
+  let ix = 0, iy = 0;
+  // chaque axe est indépendant : deux touches simultanées = déplacement diagonal
+  if(anyKey('ArrowLeft',  'KeyA', 'KeyQ', 'a', 'q')) ix -= 1;
+  if(anyKey('ArrowRight', 'KeyD', 'd'))               ix += 1;
+  if(anyKey('ArrowUp',    'KeyW', 'KeyZ', 'w', 'z'))  iy -= 1;
+  if(anyKey('ArrowDown',  'KeyS', 's'))               iy += 1;
+  const m = Math.hypot(ix, iy);
+  if(m){ ix /= m; iy /= m; }   // vitesse de diagonale = vitesse en ligne droite
+
+  const SPEED = 360, LERP = Math.min(1, dt * 8);
+  p.vx += (ix * SPEED - p.vx) * LERP;
+  p.vy += (iy * SPEED - p.vy) * LERP;
+  p.x += p.vx * dt; p.y += p.vy * dt;
+  const R = 16;
+  p.x = Math.max(R, Math.min(W - R, p.x));
+  p.y = Math.max(R, Math.min(H - R, p.y));
+
+  // l'avion s'oriente dans la direction du déplacement
+  if(Math.hypot(p.vx, p.vy) > 12) p.angle = Math.atan2(p.vy, p.vx) + Math.PI / 2;
+
+  p.inv = Math.max(0, p.inv - dt);
+  p.shootCd -= dt;
+  p.missCd = Math.max(0, p.missCd - dt);
+  p.miniCd = Math.max(0, p.miniCd - dt);
+  p.blastCd = Math.max(0, p.blastCd - dt);
+  p.shieldT = Math.max(0, p.shieldT - dt);
+
+  // tir à l'espace, dans la direction du nez de l'avion
+  if(keys[' '] && p.shootCd <= 0){
+    p.shootCd = 0.16;
+    const a = p.angle;
+    const dx = Math.sin(a), dy = -Math.cos(a);
+    // les lasers vont 25 % moins vite quand le boss est là
+    const spd = (G.boss && !G.boss.dead) ? 540 : 720;
+    G.bullets.push({ x: p.x + dx * 22, y: p.y + dy * 22, vx: dx * spd, vy: dy * spd });
+    sfx.shoot();
+  }
+
+  // missile à tête chercheuse (touche C, recharge 2 s) — 3 en même temps pendant le boss
+  if((keys['c'] || keys['C']) && p.missCd <= 0){
+    p.missCd = 2;
+    const fx = Math.sin(p.angle), fy = -Math.cos(p.angle);
+    const base = Math.atan2(fy, fx);
+    const n = (G.boss && !G.boss.dead) ? 3 : 1;
+    for(let i = 0; i < n; i++){
+      const off = (i - (n - 1) / 2) * 0.18;
+      G.missiles.push({ x: p.x + fx * 24, y: p.y + fy * 24, angle: base + off, speed: 300, turn: 5, r: 5, life: 6 });
+    }
+    sfx.missile();
+  }
+
+  // mini lasers anti-tirs ennemis (touche X, recharge 4 s)
+  if((keys['x'] || keys['X']) && p.miniCd <= 0){
+    p.miniCd = 4;
+    const fx = Math.sin(p.angle), fy = -Math.cos(p.angle);
+    const base = Math.atan2(fy, fx);
+    for(let i = 0; i < 6; i++){
+      const off = (i - 2.5) * 0.13;
+      G.miniLasers.push({ x: p.x + fx * 26, y: p.y + fy * 26, angle: base + off, speed: 480, turn: 6, r: 4, life: 6 });
+    }
+    sfx.mini();
+  }
+
+  // explosion anti-tirs ennemis (touche V, recharge 10 s)
+  if((keys['v'] || keys['V']) && p.blastCd <= 0){
+    p.blastCd = BLAST_CD;
+    const R2 = BLAST_R * BLAST_R;
+    for(let j = G.ebullets.length - 1; j >= 0; j--){
+      const b = G.ebullets[j];
+      const dx = b.x - p.x, dy = b.y - p.y;
+      if(dx * dx + dy * dy <= R2){
+        G.ebullets.splice(j, 1);
+        explode(b.x, b.y, '#8ae6ff', 6, 160);
+      }
+    }
+    G.blasts.push({ x: p.x, y: p.y, t: 0, dur: 0.6, r0: 16, r1: BLAST_R });
+    explode(p.x, p.y, '#9fd8ff', 40, 340);
+    explode(p.x, p.y, '#ffffff', 14, 200);
+    sfx.blast();
+  }
+}
+
+function damagePlayer(pct){
+  const p = G.player;
+  p.life -= pct;
+  p.inv = 1.0;                       // courte invulnérabilité après impact
+  explode(p.x, p.y, '#7ef', 14, 220);
+  sfx.hit();
+  if(p.life <= 0){
+    p.life = 0;
+    explode(p.x, p.y, '#ff9a3d', 60, 420);
+    explode(p.x, p.y, '#ff5c5c', 40, 320);
+    sfx.lose();
+    endGame(false);
+  }
+}
+
+/* ---------------- Ennemis ---------------- */
+function spawnEnemy(){
+  const m = 26, side = Math.floor(Math.random() * 4);
+  let x, y;
+  if(side === 0){ x = Math.random() * W; y = -m; }        // haut
+  else if(side === 1){ x = Math.random() * W; y = H + m; }// bas
+  else if(side === 2){ x = -m; y = Math.random() * H; }   // gauche
+  else { x = W + m; y = Math.random() * H; }              // droite
+  G.enemies.push({
+    x, y, life: ENEMY_LIFE, flash: 0, dead: false, r: 20,
+    phase: Math.random() * Math.PI * 2,
+    speed: 75 + Math.random() * 70,
+    shootCd: 1 + Math.random() * 1.6,
+    tgt: { x: G.player.x + (Math.random() * 260 - 130),
+           y: G.player.y + (Math.random() * 260 - 130) }
+  });
+}
+
+function updateEnemies(dt){
+  const p = G.player;
+  for(const e of G.enemies){
+    // homing vers une cible proche du joueur (essaim qui tournoie)
+    let dx = e.tgt.x - e.x, dy = e.tgt.y - e.y;
+    let d = Math.hypot(dx, dy);
+    if(d < 70){
+      e.tgt = { x: p.x + (Math.random() * 260 - 130), y: p.y + (Math.random() * 260 - 130) };
+      dx = e.tgt.x - e.x; dy = e.tgt.y - e.y; d = Math.hypot(dx, dy) || 1;
+    }
+    const sp = e.speed * (0.5 + 0.5 * Math.sin(G.time * 2 + e.phase));
+    e.x += dx / d * sp * dt;
+    e.y += dy / d * sp * dt;
+
+    e.flash = Math.max(0, e.flash - dt);
+
+    // tir visé sur le joueur, légèrement imprécis
+    e.shootCd -= dt;
+    if(e.shootCd <= 0){
+      e.shootCd = 1.2 + Math.random() * 1.8;
+      const a = Math.atan2(p.y - e.y, p.x - e.x) + (Math.random() - 0.5) * 0.18;
+      G.ebullets.push({
+        x: e.x + Math.cos(a) * 16, y: e.y + Math.sin(a) * 16,
+        vx: Math.cos(a) * 270, vy: Math.sin(a) * 270
+      });
+      sfx.eshoot();
+    }
+
+    // l'avion ne prend des dégâts que par les lasers : les vaisseaux glissent autour du joueur
+    const sx = e.x - p.x, sy = e.y - p.y, sd = Math.hypot(sx, sy) || 1;
+    if(sd < 36){
+      const push = (36 - sd) / 36;
+      e.x += sx / sd * push * 90 * dt;
+      e.y += sy / sd * push * 90 * dt;
+    }
+  }
+}
+
+function killEnemy(e){
+  e.dead = true;
+  G.score += KILL_POINTS;
+  G.destroyed++;
+  explode(e.x, e.y, '#8aff5e', 26, 260);
+  explode(e.x, e.y, '#ffd34d', 16, 200);
+  sfx.boom();
+  // la victoire est déclenchée par la destruction du boss final
+}
+
+function killBoss(e){
+  e.dead = true;
+  explode(e.x, e.y, '#ffd34d', 80, 460);
+  explode(e.x, e.y, '#ff5c3d', 60, 380);
+  explode(e.x, e.y, '#ffffff', 40, 300);
+  sfx.boom();
+  setTimeout(() => sfx.win(), 450);
+  endGame(true);
+}
+
+/* ---------------- Balles / collisions ---------------- */
+function updateBullets(dt){
+  const p = G.player;
+
+  // lasers du joueur
+  for(let i = G.bullets.length - 1; i >= 0; i--){
+    const b = G.bullets[i];
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    if(b.x < -30 || b.x > W + 30 || b.y < -30 || b.y > H + 30){ G.bullets.splice(i, 1); continue; }
+    let used = false;
+    for(const e of G.enemies){
+      if(e.dead) continue;
+      if(Math.hypot(b.x - e.x, b.y - e.y) <= e.r + 5){
+        e.life -= SHOT_DAMAGE;   // -50 % de vie par tir
+        e.flash = 0.15;
+        used = true;
+        if(e.life <= 0) killEnemy(e);
+        break;
+      }
+    }
+    // le boss est touché par les lasers (10 % par tir)
+    if(!used && G.boss && !G.boss.dead && Math.hypot(b.x - G.boss.x, b.y - G.boss.y) <= G.boss.r + 5){
+      G.boss.life -= 10;
+      G.boss.flash = 0.15;
+      used = true;
+      if(G.boss.life <= 0) killBoss(G.boss);
+    }
+    if(used) G.bullets.splice(i, 1);
+  }
+
+  // lasers ennemis
+  for(let i = G.ebullets.length - 1; i >= 0; i--){
+    const b = G.ebullets[i];
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    if(b.x < -30 || b.x > W + 30 || b.y < -30 || b.y > H + 30){ G.ebullets.splice(i, 1); continue; }
+    // missiles à tête chercheuse du boss
+    if(b.homing){
+      let bx = null, bd = Infinity;
+      if(b.blue){
+        bx = G.player;                 // le missile bleu cible l'avion
+      } else {
+        // les missiles rouges chassent les armes de l'avion
+        for(const arr of [G.bullets, G.missiles, G.miniLasers]){
+          for(const pr of arr){
+            const d = (pr.x - b.x) * (pr.x - b.x) + (pr.y - b.y) * (pr.y - b.y);
+            if(d < bd){ bd = d; bx = pr; }
+          }
+        }
+      }
+      if(bx){
+        const cur = Math.atan2(b.vy, b.vx);
+        let diff = Math.atan2(bx.y - b.y, bx.x - b.x) - cur;
+        while(diff > Math.PI) diff -= Math.PI * 2;
+        while(diff < -Math.PI) diff += Math.PI * 2;
+        const na = cur + Math.max(-b.turn * dt, Math.min(b.turn * dt, diff));
+        b.vx = Math.cos(na) * b.speed;
+        b.vy = Math.sin(na) * b.speed;
+      }
+      if(!b.blue){
+        // détruit l'arme de l'avion qu'il touche
+        let killed = false;
+        outer: for(const arr of [G.bullets, G.missiles, G.miniLasers]){
+          for(let j = arr.length - 1; j >= 0; j--){
+            const pr = arr[j];
+            if(Math.hypot(pr.x - b.x, pr.y - b.y) <= (pr.r || 5) + (b.r || 5)){
+              arr.splice(j, 1);
+              explode(pr.x, pr.y, '#ffb347', 8, 160);
+              sfx.pop();
+              killed = true;
+              break outer;
+            }
+          }
+        }
+        if(killed){ G.ebullets.splice(i, 1); continue; }
+      }
+    }
+    const dist = Math.hypot(b.x - p.x, b.y - p.y);
+    // missile bleu : désactive le bouclier, sinon 25 % de dégâts
+    if(b.blue && dist <= 16 + (b.r || 5)){
+      G.ebullets.splice(i, 1);
+      if(p.shieldT > 0){
+        p.shieldT = 0;                 // bouclier désactivé
+        explode(p.x, p.y, '#6fd8ff', 16, 240);
+        sfx.shielddown();
+      } else {
+        damagePlayer(25);              // 25 % d'intégrité
+      }
+      continue;
+    }
+    if(p.shieldT > 0 && dist <= SHIELD_R){
+      // le bouclier détruit les tirs ennemis au contact
+      G.ebullets.splice(i, 1);
+      explode(b.x, b.y, '#6fd8ff', 6, 140);
+      sfx.pop();
+      continue;
+    }
+    if(p.inv <= 0 && dist <= 16 + (b.r || 5)){
+      G.ebullets.splice(i, 1);
+      damagePlayer(5);           // -5 % d'intégrité
+    }
+  }
+
+  G.enemies = G.enemies.filter(e => !e.dead);
+}
+
+/* ---------------- Missiles à tête chercheuse ---------------- */
+function updateMissiles(dt){
+  for(let i = G.missiles.length - 1; i >= 0; i--){
+    const m = G.missiles[i];
+    m.life -= dt;
+    if(m.life <= 0){ G.missiles.splice(i, 1); continue; }
+
+    // cherche la cible la plus proche (boss puis vaisseaux)
+    let best = null, bestD = Infinity;
+    if(G.boss && !G.boss.dead){
+      const d = (G.boss.x - m.x) * (G.boss.x - m.x) + (G.boss.y - m.y) * (G.boss.y - m.y);
+      bestD = d; best = G.boss;
+    }
+    for(const e of G.enemies){
+      if(e.dead) continue;
+      const d = (e.x - m.x) * (e.x - m.x) + (e.y - m.y) * (e.y - m.y);
+      if(d < bestD){ bestD = d; best = e; }
+    }
+    if(best){
+      let diff = Math.atan2(best.y - m.y, best.x - m.x) - m.angle;
+      while(diff > Math.PI) diff -= Math.PI * 2;
+      while(diff < -Math.PI) diff += Math.PI * 2;
+      m.angle += Math.max(-m.turn * dt, Math.min(m.turn * dt, diff));
+    }
+    m.speed = Math.min(520, m.speed + 380 * dt);
+    m.x += Math.cos(m.angle) * m.speed * dt;
+    m.y += Math.sin(m.angle) * m.speed * dt;
+
+    // traînée de fumée
+    G.parts.push({
+      x: m.x - Math.cos(m.angle) * 10, y: m.y - Math.sin(m.angle) * 10,
+      vx: (Math.random() - 0.5) * 30, vy: (Math.random() - 0.5) * 30,
+      life: 0.25 + Math.random() * 0.15, max: 0.4,
+      size: 2 + Math.random() * 2.5, color: '#b8b8c8'
+    });
+
+    // impact : un missile détruit un vaisseau
+    let hit = false;
+    for(const e of G.enemies){
+      if(e.dead) continue;
+      if(Math.hypot(m.x - e.x, m.y - e.y) <= e.r + m.r){
+        e.life -= 100;
+        e.flash = 0.2;
+        if(e.life <= 0) killEnemy(e);
+        hit = true;
+        break;
+      }
+    }
+    // impact sur le boss : 2 % de vie par missile
+    if(!hit && G.boss && !G.boss.dead && Math.hypot(m.x - G.boss.x, m.y - G.boss.y) <= G.boss.r + m.r){
+      G.boss.life -= 2;
+      G.boss.flash = 0.2;
+      if(G.boss.life <= 0) killBoss(G.boss);
+      hit = true;
+    }
+    if(hit){
+      explode(m.x, m.y, '#ffd34d', 30, 320);
+      explode(m.x, m.y, '#ff8c42', 20, 260);
+      sfx.boom();
+      G.missiles.splice(i, 1);
+    } else if(m.x < -40 || m.x > W + 40 || m.y < -40 || m.y > H + 40){
+      G.missiles.splice(i, 1);
+    }
+  }
+}
+
+/* ---------------- Mini lasers (interception des tirs ennemis) ---------------- */
+function updateMiniLasers(dt){
+  for(let i = G.miniLasers.length - 1; i >= 0; i--){
+    const m = G.miniLasers[i];
+    m.life -= dt;
+    if(m.life <= 0){ G.miniLasers.splice(i, 1); continue; }
+
+    // verrouille le tir ennemi le plus proche
+    let best = null, bestD = Infinity;
+    for(const b of G.ebullets){
+      const d = (b.x - m.x) * (b.x - m.x) + (b.y - m.y) * (b.y - m.y);
+      if(d < bestD){ bestD = d; best = b; }
+    }
+    if(best){
+      let diff = Math.atan2(best.y - m.y, best.x - m.x) - m.angle;
+      while(diff > Math.PI) diff -= Math.PI * 2;
+      while(diff < -Math.PI) diff += Math.PI * 2;
+      m.angle += Math.max(-m.turn * dt, Math.min(m.turn * dt, diff));
+    }
+    m.speed = Math.min(720, m.speed + 500 * dt);
+    m.x += Math.cos(m.angle) * m.speed * dt;
+    m.y += Math.sin(m.angle) * m.speed * dt;
+
+    // interception : le tir ennemi touché est détruit
+    let hit = false;
+    for(let j = G.ebullets.length - 1; j >= 0; j--){
+      const b = G.ebullets[j];
+      if(Math.hypot(m.x - b.x, m.y - b.y) <= m.r + (b.r || 5)){
+        G.ebullets.splice(j, 1);
+        hit = true;
+        break;
+      }
+    }
+    if(hit){
+      explode(m.x, m.y, '#8ae6ff', 10, 180);
+      sfx.pop();
+      G.miniLasers.splice(i, 1);
+    } else if(m.x < -40 || m.x > W + 40 || m.y < -40 || m.y > H + 40){
+      G.miniLasers.splice(i, 1);
+    }
+  }
+}
+
+/* ---------------- Onde de choc de l'explosion ---------------- */
+function updateBlasts(dt){
+  for(let i = G.blasts.length - 1; i >= 0; i--){
+    const b = G.blasts[i];
+    b.t += dt;
+    if(b.t >= b.dur) G.blasts.splice(i, 1);
+  }
+}
+
+/* ---------------- Objets à ramasser (réparation / bouclier) ---------------- */
+function spawnItem(){
+  const m = 24, side = Math.floor(Math.random() * 4);
+  let x, y;
+  if(side === 0){ x = Math.random() * W; y = -m; }
+  else if(side === 1){ x = Math.random() * W; y = H + m; }
+  else if(side === 2){ x = -m; y = Math.random() * H; }
+  else { x = W + m; y = Math.random() * H; }
+  const tx = Math.random() * W, ty = Math.random() * H;
+  const dx = tx - x, dy = ty - y, d = Math.hypot(dx, dy) || 1;
+  const sp = 90 + Math.random() * 60;
+  G.items.push({
+    x, y, vx: dx / d * sp, vy: dy / d * sp,
+    type: Math.random() < 0.5 ? 'repair' : 'shield',
+    r: ITEM_R, t: Math.random() * Math.PI * 2
+  });
+}
+
+function updateItems(dt){
+  const p = G.player;
+  for(let i = G.items.length - 1; i >= 0; i--){
+    const it = G.items[i];
+    it.t += dt;
+    it.x += it.vx * dt; it.y += it.vy * dt;
+    if(it.x < -40 || it.x > W + 40 || it.y < -40 || it.y > H + 40){ G.items.splice(i, 1); continue; }
+    if(Math.hypot(it.x - p.x, it.y - p.y) <= it.r + 16){
+      G.items.splice(i, 1);
+      if(it.type === 'repair'){
+        p.life = PLAYER_LIFE;              // réparation : vie à 100 %
+        explode(p.x, p.y, '#5cff6a', 20, 240);
+        sfx.pickup();
+      } else {
+        p.shieldT = SHIELD_TIME;           // bouclier : 25 s d'invulnérabilité
+        explode(p.x, p.y, '#6fd8ff', 20, 240);
+        sfx.shield();
+      }
+    }
+  }
+}
+
+/* ---------------- Boss final (vaisseau mère) ---------------- */
+function spawnBoss(){
+  G.boss = {
+    x: W / 2, y: -80,
+    life: 100, r: 70,
+    isBoss: true, dead: false, flash: 0,
+    shootCd: 1.5, missileCd: 3, homingCd: 4, blueCd: 5,
+    t: 0, phase: Math.random() * Math.PI * 2,
+    wspeed: 70 + Math.random() * 40,
+    wp: null, wpT: 4
+  };
+  sfx.boss();
+}
+
+function pickBossWaypoint(){
+  return { x: 80 + Math.random() * Math.max(1, W - 160),
+           y: 70 + Math.random() * Math.max(1, H - 190) };
+}
+
+function updateBoss(dt){
+  const b = G.boss;
+  if(!b || b.dead) return;
+  b.t += dt;
+  b.flash = Math.max(0, b.flash - dt);
+  // esquive les tirs de l'avion (lasers, mini lasers, missiles)
+  let dodge = 0;
+  for(const arr of [G.bullets, G.miniLasers, G.missiles]){
+    for(const pr of arr){
+      const vx = pr.vx !== undefined ? pr.vx : Math.cos(pr.angle) * pr.speed;
+      const vy = pr.vy !== undefined ? pr.vy : Math.sin(pr.angle) * pr.speed;
+      const dx = b.x - pr.x, dy = b.y - pr.y;
+      const d = Math.hypot(dx, dy);
+      if(d > 320 || d < 40) continue;
+      const sp = Math.hypot(vx, vy) || 1;
+      // le tir se rapproche-t-il du boss ?
+      if((vx * dx + vy * dy) / (d * sp) > 0.3){
+        dodge += (dx > 0 ? 1 : -1) * (1 - d / 320);
+      }
+    }
+  }
+  // le boss se déplace sur TOUT l'écran (waypoints aléatoires) + esquive
+  if(!b.wp) b.wp = pickBossWaypoint();
+  b.wpT -= dt;
+  const wdx = b.wp.x - b.x, wdy = b.wp.y - b.y;
+  const wd = Math.hypot(wdx, wdy);
+  if(b.wpT <= 0 || wd < 60){
+    b.wp = pickBossWaypoint();
+    b.wpT = 4 + Math.random() * 4;
+  } else {
+    b.x += wdx / wd * b.wspeed * dt;
+    b.y += wdy / wd * b.wspeed * dt;
+  }
+  b.x += dodge * 340 * dt;
+  b.x = Math.max(80, Math.min(W - 80, b.x));
+  b.y = Math.max(70, Math.min(H - 120, b.y));
+  // rafales de lasers visés
+  b.shootCd -= dt;
+  if(b.shootCd <= 0){
+    b.shootCd = 0.7 + Math.random() * 0.5;
+    const n = 2 + Math.floor(Math.random() * 4);
+    for(let i = 0; i < n; i++){
+      const a = Math.atan2(G.player.y - b.y, G.player.x - b.x) + (i - (n - 1) / 2) * 0.22;
+      G.ebullets.push({ x: b.x + Math.cos(a) * 70, y: b.y + Math.sin(a) * 70 + 20,
+                        vx: Math.cos(a) * 330, vy: Math.sin(a) * 330 });
+    }
+    sfx.eshoot();
+  }
+  // missiles NON guidés : ligne droite, visés à l'instant du tir
+  b.missileCd -= dt;
+  if(b.missileCd <= 0){
+    b.missileCd = 1.8 + Math.random() * 1.0;
+    const nb = 3 + Math.floor(Math.random() * 4);
+    for(let i = 0; i < nb; i++){
+      const a = Math.atan2(G.player.y - b.y, G.player.x - b.x) + (i - (nb - 1) / 2) * 0.16;
+      G.ebullets.push({ x: b.x + Math.cos(a) * 70, y: b.y + Math.sin(a) * 70 + 20,
+                        vx: Math.cos(a) * 200, vy: Math.sin(a) * 200, r: 9, missile: true });
+    }
+    sfx.bmissile();
+  }
+  // 4 missiles à tête chercheuse contre les armes de l'avion, toutes les 4 s
+  b.homingCd -= dt;
+  if(b.homingCd <= 0){
+    b.homingCd = 4;
+    for(let i = 0; i < 4; i++){
+      const a = Math.atan2(G.player.y - b.y, G.player.x - b.x) + (i - 1.5) * 0.22;
+      G.ebullets.push({ x: b.x + Math.cos(a) * 70, y: b.y + Math.sin(a) * 70 + 20,
+                        vx: Math.cos(a) * 180, vy: Math.sin(a) * 180,
+                        r: 9, missile: true, homing: true, speed: 180, turn: 4 });
+    }
+    sfx.bmissile();
+  }
+  // missile bleu spécial : désactive le bouclier, sinon 25 % de dégâts — toutes les 5 s
+  b.blueCd -= dt;
+  if(b.blueCd <= 0){
+    b.blueCd = 5;
+    const a = Math.atan2(G.player.y - b.y, G.player.x - b.x);
+    G.ebullets.push({ x: b.x + Math.cos(a) * 70, y: b.y + Math.sin(a) * 70 + 20,
+                      vx: Math.cos(a) * 220, vy: Math.sin(a) * 220,
+                      r: 10, missile: true, homing: true, blue: true, speed: 220, turn: 3.5 });
+    sfx.blue();
+  }
+}
+
+function drawBoss(){
+  const b = G.boss;
+  if(!b || b.dead) return;
+  const flash = b.flash > 0;
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.shadowColor = flash ? '#ffffff' : '#ff5c3d';
+  ctx.shadowBlur = flash ? 40 : 22;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 80, 34, 0, 0, Math.PI * 2);
+  ctx.fillStyle = flash ? '#ffffff' : '#8f2f2f';
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#ff9a6a'; ctx.lineWidth = 3;
+  ctx.stroke();
+  // dôme central
+  ctx.beginPath();
+  ctx.arc(0, -6, 26, Math.PI, 0);
+  ctx.closePath();
+  ctx.fillStyle = flash ? '#ffffff' : '#d94f4f';
+  ctx.fill();
+  // lumières du bord
+  for(let i = 0; i < 10; i++){
+    const a = b.t * 2 + i * Math.PI / 5;
+    ctx.beginPath();
+    ctx.arc(Math.cos(a) * 72, Math.sin(a) * 28, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = i % 2 ? '#ffd34d' : '#ff5c8a';
+    ctx.fill();
+  }
+  // canons
+  ctx.fillStyle = flash ? '#ffffff' : '#5c1414';
+  ctx.fillRect(-55, -14, 18, 10);
+  ctx.fillRect(37, -14, 18, 10);
+  ctx.restore();
+}
+
+function drawBossBar(){
+  const b = G.boss;
+  if(!b || b.dead) return;
+  const bw = Math.min(W * 0.5, 560), bh = 16;
+  const bx = (W - bw) / 2, by = 70;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(bx - 3, by - 3, bw + 6, bh + 6);
+  ctx.fillStyle = '#3a1212';
+  ctx.fillRect(bx, by, bw, bh);
+  const pct = Math.max(0, b.life / 100);
+  ctx.fillStyle = pct > 0.5 ? '#ffd23d' : (pct > 0.25 ? '#ff8c42' : '#ff4d2e');
+  ctx.fillRect(bx, by, bw * pct, bh);
+  ctx.strokeStyle = '#ff9a6a'; ctx.lineWidth = 2;
+  ctx.strokeRect(bx, by, bw, bh);
+  ctx.fillStyle = '#ffd9b0';
+  ctx.font = 'bold 13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('VAISSEAU MÈRE — BOSS', W / 2, by - 8);
+}
+
+/* ---------------- Fin / démarrage ---------------- */
+function endGame(won){
+  G.state = won ? 'won' : 'over';
+  if(won){ winScore.textContent = G.score; win.classList.remove('hidden'); sfx.win(); }
+  else   { overScore.textContent = G.score; over.classList.remove('hidden'); }
+}
+
+function startGame(){
+  ensureAudio();
+  G.state = 'play';
+  G.boss = null;
+  G.score = 0; G.destroyed = 0; G.time = 0; G.spawnTimer = 0.6; G.itemTimer = 4;
+  G.bullets.length = 0; G.ebullets.length = 0; G.missiles.length = 0; G.miniLasers.length = 0; G.enemies.length = 0; G.parts.length = 0; G.blasts.length = 0; G.items.length = 0;
+  const p = G.player;
+  p.x = W / 2; p.y = H / 2; p.vx = 0; p.vy = 0; p.angle = 0;
+  p.life = PLAYER_LIFE; p.inv = 1.2; p.shootCd = 0; p.missCd = 0; p.miniCd = 0; p.blastCd = 0; p.shieldT = 0;
+  makeStars();
+  menu.classList.add('hidden'); win.classList.add('hidden'); over.classList.add('hidden');
+  hud.classList.remove('hidden');
+}
+
+/* ---------------- HUD ---------------- */
+function updateHUD(){
+  scoreEl.textContent = G.score;
+  destroyedEl.textContent = G.destroyed + ' / ' + TOTAL;
+  const lf = Math.max(0, G.player.life) / PLAYER_LIFE * 100;
+  lifeFill.style.width = lf + '%';
+  lifeFill.style.background =
+    lf > 50 ? 'linear-gradient(90deg,#39d353,#4ae)'
+  : lf > 25 ? 'linear-gradient(90deg,#ffd23d,#ff9d3d)'
+  :           'linear-gradient(90deg,#ff5c5c,#ff2d2d)';
+  lifePctEl.textContent = Math.ceil(G.player.life) + ' %';
+  const mcd = G.player.missCd;
+  missileEl.textContent = mcd > 0 ? mcd.toFixed(1) + ' s' : 'Prêt';
+  missileEl.style.color = mcd > 0 ? '#ffb347' : '#7ef2ff';
+  missileFill.style.width = (mcd > 0 ? (1 - mcd / 2) * 100 : 100) + '%';
+  const mnc = G.player.miniCd;
+  miniEl.textContent = mnc > 0 ? mnc.toFixed(1) + ' s' : 'Prêt';
+  miniEl.style.color = mnc > 0 ? '#b48cff' : '#7ef2ff';
+  miniFill.style.width = (mnc > 0 ? (1 - mnc / 4) * 100 : 100) + '%';
+  const bcd = G.player.blastCd;
+  blastEl.textContent = bcd > 0 ? bcd.toFixed(1) + ' s' : 'Prêt';
+  blastEl.style.color = bcd > 0 ? '#9fd8ff' : '#7ef2ff';
+  blastFill.style.width = (bcd > 0 ? (1 - bcd / BLAST_CD) * 100 : 100) + '%';
+  const st = G.player.shieldT;
+  shieldEl.textContent = st > 0 ? st.toFixed(1) + ' s' : 'Inactif';
+  shieldEl.style.color = st > 0 ? '#6fd8ff' : '#8fb2d4';
+  shieldFill.style.width = (st > 0 ? st / SHIELD_TIME * 100 : 0) + '%';
+}
+
+/* ---------------- Dessin ---------------- */
+function drawPlayer(){
+  const p = G.player;
+  if(G.state !== 'play' && G.state !== 'won') return;
+  const blink = p.inv > 0 && Math.floor(G.time * 14) % 2 === 0;
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(p.angle);   // angle 0 = nez vers le haut
+  ctx.globalAlpha = blink ? 0.35 : 1;
+
+  // flamme du réacteur
+  const fl = (Math.sin(G.time * 30) + 1) * 5;
+  ctx.beginPath();
+  ctx.moveTo(0, 12); ctx.lineTo(-7, 22 + fl); ctx.lineTo(7, 22 + fl);
+  ctx.closePath();
+  ctx.fillStyle = '#ff9d3d'; ctx.shadowColor = '#ff9d3d'; ctx.shadowBlur = 14;
+  ctx.fill(); ctx.shadowBlur = 0;
+
+  // fuselage
+  ctx.beginPath();
+  ctx.moveTo(0, -24);
+  ctx.lineTo(9, -4);
+  ctx.lineTo(24, 12);
+  ctx.lineTo(7, 16);
+  ctx.lineTo(0, 11);
+  ctx.lineTo(-7, 16);
+  ctx.lineTo(-24, 12);
+  ctx.lineTo(-9, -4);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, -24, 0, 16);
+  grad.addColorStop(0, '#e8faff'); grad.addColorStop(0.45, '#5bc8f5'); grad.addColorStop(1, '#1b4f8f');
+  ctx.fillStyle = grad;
+  ctx.shadowColor = '#38d0ff'; ctx.shadowBlur = 16;
+  ctx.fill(); ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#9fe9ff'; ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // cockpit
+  ctx.beginPath(); ctx.ellipse(0, -6, 4.5, 9, 0, 0, Math.PI * 2);
+  ctx.fillStyle = '#aef2ff'; ctx.fill();
+
+  ctx.restore();
+  ctx.globalAlpha = 1;
+
+  // bouclier actif : bulle translucide autour de l'avion
+  if(p.shieldT > 0){
+    const k = 0.55 + 0.25 * Math.sin(G.time * 6);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, SHIELD_R, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(111,216,255,' + (0.10 * k).toFixed(3) + ')';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(111,216,255,' + (0.55 * k).toFixed(3) + ')';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, SHIELD_R, G.time * 1.5, G.time * 1.5 + 1.2);
+    ctx.strokeStyle = 'rgba(190,240,255,' + (0.8 * k).toFixed(3) + ')';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+}
+
+function drawEnemy(e){
+  const flash = e.flash > 0, t = G.time;
+  ctx.save();
+  ctx.translate(e.x, e.y);
+
+  // coque de la soucoupe
+  ctx.shadowColor = flash ? '#ffffff' : '#39ff7a';
+  ctx.shadowBlur = flash ? 30 : 16;
+  ctx.beginPath(); ctx.ellipse(0, 0, 22, 11, 0, 0, Math.PI * 2);
+  ctx.fillStyle = flash ? '#ffffff' : '#35b855';
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#1e7a3a'; ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // lumières du bord
+  for(let i = 0; i < 6; i++){
+    const a = t * 3 + i * Math.PI / 3;
+    ctx.beginPath();
+    ctx.arc(Math.cos(a) * 20, Math.sin(a) * 10, 2.4, 0, Math.PI * 2);
+    ctx.fillStyle = i % 2 ? '#7fffd4' : '#ffab4d';
+    ctx.fill();
+  }
+
+  // dôme
+  ctx.beginPath(); ctx.arc(0, 0, 9, Math.PI, 0); ctx.closePath();
+  ctx.fillStyle = flash ? '#ffffff' : '#c9ffb0';
+  ctx.fill();
+
+  // canon pointé vers le joueur
+  const a = Math.atan2(G.player.y - e.y, G.player.x - e.x);
+  ctx.save(); ctx.rotate(a);
+  ctx.fillStyle = flash ? '#ffffff' : '#2f9e4e';
+  ctx.fillRect(0, -3, 26, 6);
+  ctx.restore();
+
+  ctx.restore();
+}
+
+function drawBullets(){
+  // lasers du joueur
+  for(const b of G.bullets){
+    const len = Math.hypot(b.vx, b.vy) || 1;
+    const ux = b.vx / len, uy = b.vy / len;
+    ctx.strokeStyle = '#9ff3ff';
+    ctx.shadowColor = '#38e0ff'; ctx.shadowBlur = 10;
+    ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(b.x - ux * 14, b.y - uy * 14);
+    ctx.lineTo(b.x + ux * 6, b.y + uy * 6);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+  // tirs ennemis (lasers et missiles du boss)
+  for(const b of G.ebullets){
+    if(b.blue){
+      // missile bleu spécial : désactive le bouclier de l'avion
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(Math.atan2(b.vy, b.vx));
+      ctx.fillStyle = '#4db8ff';
+      ctx.shadowColor = '#2f8aff'; ctx.shadowBlur = 16;
+      ctx.beginPath();
+      ctx.moveTo(14, 0); ctx.lineTo(-8, -6); ctx.lineTo(-12, 0); ctx.lineTo(-8, 6);
+      ctx.closePath();
+      ctx.fill(); ctx.shadowBlur = 0;
+      ctx.restore();
+    } else if(b.homing){
+      // missile à tête chercheuse du boss : rouge, chasse les armes de l'avion
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(Math.atan2(b.vy, b.vx));
+      ctx.fillStyle = '#ff4d5c';
+      ctx.shadowColor = '#ff1f33'; ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.moveTo(13, 0); ctx.lineTo(-7, -5); ctx.lineTo(-10, 0); ctx.lineTo(-7, 5);
+      ctx.closePath();
+      ctx.fill(); ctx.shadowBlur = 0;
+      ctx.restore();
+    } else if(b.missile){
+      // missile non guidé du boss : gros projectile avec traînée
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(Math.atan2(b.vy, b.vx));
+      ctx.fillStyle = '#ffb347';
+      ctx.shadowColor = '#ff7b3d'; ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.moveTo(12, 0); ctx.lineTo(-8, -5); ctx.lineTo(-11, 0); ctx.lineTo(-8, 5);
+      ctx.closePath();
+      ctx.fill(); ctx.shadowBlur = 0;
+      ctx.restore();
+    } else {
+      ctx.beginPath();
+      ctx.fillStyle = '#ff6a4d'; ctx.shadowColor = '#ff4d2e'; ctx.shadowBlur = 12;
+      ctx.arc(b.x, b.y, 5, 0, Math.PI * 2);
+      ctx.fill(); ctx.shadowBlur = 0;
+    }
+  }
+}
+
+function drawMissiles(){
+  for(const m of G.missiles){
+    ctx.save();
+    ctx.translate(m.x, m.y);
+    ctx.rotate(m.angle);
+    // flamme
+    const fl = (Math.sin(G.time * 40) + 1) * 4;
+    ctx.beginPath();
+    ctx.moveTo(-9, 0); ctx.lineTo(-15 - fl, -3); ctx.lineTo(-15 - fl, 3);
+    ctx.closePath();
+    ctx.fillStyle = '#ffb347'; ctx.fill();
+    // corps
+    ctx.beginPath();
+    ctx.moveTo(11, 0);
+    ctx.lineTo(-9, -3.5);
+    ctx.lineTo(-12, 0);
+    ctx.lineTo(-9, 3.5);
+    ctx.closePath();
+    ctx.fillStyle = '#ff5c3d';
+    ctx.shadowColor = '#ff8c42'; ctx.shadowBlur = 12;
+    ctx.fill(); ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+}
+
+function drawMiniLasers(){
+  for(const m of G.miniLasers){
+    ctx.save();
+    ctx.translate(m.x, m.y);
+    ctx.rotate(m.angle);
+    // traînée violette
+    ctx.strokeStyle = '#c9a6ff';
+    ctx.shadowColor = '#8a5cff'; ctx.shadowBlur = 10;
+    ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-10, 0); ctx.lineTo(8, 0);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // cœur blanc
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-6, 0); ctx.lineTo(6, 0);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawBlasts(){
+  for(const b of G.blasts){
+    const k = b.t / b.dur;
+    if(k >= 1) continue;
+    const r = b.r0 + (b.r1 - b.r0) * k;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(160,220,255,' + (0.7 * (1 - k)).toFixed(3) + ')';
+    ctx.lineWidth = 3 + 2 * (1 - k);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, r * 0.75, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,' + (0.5 * (1 - k)).toFixed(3) + ')';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
+
+function drawItems(){
+  for(const it of G.items){
+    const pulse = 1 + 0.15 * Math.sin(it.t * 5);
+    ctx.save();
+    ctx.translate(it.x, it.y);
+    if(it.type === 'repair'){
+      // croix de réparation verte sur fond blanc
+      ctx.shadowColor = '#5cff6a'; ctx.shadowBlur = 14;
+      ctx.beginPath(); ctx.arc(0, 0, 13 * pulse, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#2fbf4f';
+      ctx.fillRect(-7 * pulse, -2.2, 14 * pulse, 4.4);
+      ctx.fillRect(-2.2, -7 * pulse, 4.4, 14 * pulse);
+    } else {
+      // bouclier bleu
+      ctx.shadowColor = '#6fd8ff'; ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.arc(0, 0, 13 * pulse, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(60,140,220,0.9)'; ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#9fe8ff'; ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -8 * pulse);
+      ctx.lineTo(6 * pulse, -4 * pulse);
+      ctx.lineTo(6 * pulse, 3 * pulse);
+      ctx.lineTo(0, 8 * pulse);
+      ctx.lineTo(-6 * pulse, 3 * pulse);
+      ctx.lineTo(-6 * pulse, -4 * pulse);
+      ctx.closePath();
+      ctx.fillStyle = '#eaf8ff';
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+function draw(){
+  ctx.fillStyle = '#02030a';
+  ctx.fillRect(0, 0, W, H);
+  drawStars();
+  if(G.state !== 'menu'){
+    drawBullets();
+    drawMissiles();
+    drawMiniLasers();
+    for(const e of G.enemies) drawEnemy(e);
+    drawBoss();
+    drawBlasts();
+    drawItems();
+    drawPlayer();
+    drawParts();
+    drawBossBar();
+  } else {
+    drawParts();
+  }
+}
+
+/* ---------------- Entrées clavier ---------------- */
+const keys = {}, codes = {};
+// une touche est considérée enfoncée si son e.key (lettre) OU son e.code
+// (position physique) est actif → combinaisons fiables sur tous les claviers
+function anyKey(...names){ for(const n of names) if(keys[n] || codes[n]) return true; return false; }
+window.addEventListener('keydown', e => {
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  keys[e.key] = true;
+  codes[e.code] = true;
+  if(G.state === 'menu' && (e.key === ' ' || e.key === 'Enter')) startGame();
+});
+window.addEventListener('keyup', e => {
+  keys[e.key] = false;
+  codes[e.code] = false;
+});
+window.addEventListener('blur', () => {
+  for(const k in keys) keys[k] = false;
+  for(const k in codes) codes[k] = false;
+});
+
+startBtn.addEventListener('click', startGame);
+winBtn.addEventListener('click', startGame);
+overBtn.addEventListener('click', startGame);
+muteBtn.addEventListener('click', () => { muted = !muted; muteBtn.textContent = muted ? '🔇' : '🔊'; });
+
+/* ---------------- Boucle principale ---------------- */
+resize(); // initialise la taille du canvas (et les étoiles), après déclaration de G
+let last = performance.now();
+function loop(now){
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  G.time += dt;
+  updateStars(dt);
+
+  if(G.state === 'play'){
+    updatePlayer(dt);
+
+    // apparition des vaisseaux : max 10 en même temps, 60 au total
+    G.spawnTimer -= dt;
+    if(G.spawnTimer <= 0 && G.enemies.length < MAX_ALIVE && G.destroyed + G.enemies.length < TOTAL){
+      spawnEnemy();
+      const ramp = Math.max(0.35, 1.5 - G.destroyed * 0.018);
+      G.spawnTimer = ramp * (0.6 + Math.random() * 0.8);
+    }
+
+    // objets de ramassage aléatoires (réparation / bouclier)
+    G.itemTimer -= dt;
+    if(G.itemTimer <= 0){
+      if(G.items.length < 2) spawnItem();
+      G.itemTimer = 7 + Math.random() * 6;
+    }
+
+    // boss final : apparaît quand tous les vaisseaux sont détruits
+    if(!G.boss && G.destroyed >= TOTAL && G.enemies.length === 0){
+      spawnBoss();
+    }
+
+    updateEnemies(dt);
+    updateBoss(dt);
+    updateBullets(dt);
+    updateMissiles(dt);
+    updateMiniLasers(dt);
+    updateBlasts(dt);
+    updateItems(dt);
+    updateParts(dt);
+    updateHUD();
+  }
+
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
