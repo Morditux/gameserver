@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Vue d'ensemble
-Serveur HTTP Go minimal qui sert un index de jeux HTML5. Chaque jeu est un **fichier HTML autonome** (JS vanilla + Canvas, aucune dépendance externe). UI, commentaires et messages de commit en **français**.
+Serveur HTTP Go minimal qui sert un index de jeux HTML5. Chaque jeu est un **fichier HTML autonome** (JS vanilla + Canvas ou WebGL). Les dépendances externes sont autorisées uniquement via des CDN versionnés et doivent être déclarées dans la page. UI, commentaires et messages de commit en **français**.
 
 ## Commandes
 - `go build .` — compilation
@@ -24,9 +24,9 @@ Serveur HTTP Go minimal qui sert un index de jeux HTML5. Chaque jeu est un **fic
 
 ## Conventions
 - Commentaires, UI, messages de commit en **français** (préfixes de commit : `feat:`, `fix:`).
-- Jeux : aucun JS externe, pas de build, sons WebAudio, records en `localStorage`, JS dans une IIFE, thème néon sombre.
+- Jeux : pas de build, sons WebAudio, records en `localStorage`, JS dans une IIFE, thème néon sombre. Une bibliothèque JavaScript externe peut être chargée depuis un CDN versionné lorsque le jeu en a besoin (par exemple Three.js pour une scène 3D).
 - Canvas : **obligatoire** de définir `canvas.style.width/height` dans `resize()` en plus de `canvas.width/height` — sinon le canvas déborde de l'écran sur tablette/téléphone (DPR > 1).
-- Sécurité : ne jamais servir de fichiers arbitraires ; conserver `validGameName` et `securityHeaders`. Le CSP autorise les scripts inline (`'unsafe-inline'`).
+- Sécurité : ne jamais servir de fichiers arbitraires ; conserver `validGameName` et `securityHeaders`. Le CSP autorise les scripts inline (`'unsafe-inline'`) et doit lister explicitement tout CDN utilisé par un jeu.
 
 ## Pièges connus
 - L'index est généré depuis `<title>` : un jeu sans `<title>` apparaît avec son nom de fichier.
