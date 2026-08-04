@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="description" content="PUISSANCE 4 — affronte l'ordinateur au Puissance 4 classique : aligne 4 jetons pour gagner. 4 niveaux de difficulté, jouable au clavier et au tactile."/>
+<title>Puissance 4 — Affronte l'Ordinateur</title>
+<style>
+  * { box-sizing: border-box; }
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#04101f;
+    font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#eaf6ff;
+    overscroll-behavior:none;-webkit-user-select:none;user-select:none;}
+  canvas{display:block;touch-action:none;}
+
+  /* ---------- HUD ---------- */
+  #hud{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:12px;
+    padding:8px 14px;z-index:5;flex-wrap:wrap;min-height:56px;
+    background:linear-gradient(rgba(0,0,0,.62),rgba(0,0,0,0));}
+  #hud.hidden{display:none;}
+  #hud .brand{font-size:14px;font-weight:800;letter-spacing:3px;color:#7ee8a0;
+    text-shadow:0 0 12px #2fe07a88;white-space:nowrap;}
+  #turnWrap{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.14);border-radius:20px;padding:5px 12px;min-height:30px;}
+  #turnDisc{width:18px;height:18px;border-radius:50%;flex:none;}
+  #turnDisc.p{background:radial-gradient(circle at 32% 30%,#fff3b0,#ffd54f 55%,#f57f17);
+    box-shadow:0 0 10px #ffd54f;}
+  #turnDisc.a{background:radial-gradient(circle at 32% 30%,#ffb3b3,#ff6b6b 55%,#b71c1c);
+    box-shadow:0 0 10px #ff6b6b;}
+  #turnText{font-size:12.5px;font-weight:600;white-space:nowrap;}
+  #statsWrap{margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  #statsWrap .stat{font-size:12px;color:#9fd6ff;white-space:nowrap;}
+  #statsWrap .stat b{color:#ffe066;font-size:13px;}
+  #diffChip{font-size:12px;font-weight:700;color:#cfe8ff;background:rgba(0,212,255,.12);
+    border:1px solid rgba(0,212,255,.35);border-radius:14px;padding:4px 10px;white-space:nowrap;}
+
+  /* ---------- Écrans ---------- */
+  .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;background:radial-gradient(ellipse at center,rgba(4,14,28,.78),rgba(0,0,0,.95));
+    z-index:10;text-align:center;padding:22px;overflow:auto;}
+  .overlay.hidden{display:none;}
+  .overlay h1{margin:0;font-size:clamp(34px,8vw,72px);letter-spacing:6px;color:#7ee8a0;
+    text-shadow:0 0 22px #2fe07a,0 0 60px #2fe07a66;}
+  .overlay h1.win{color:#7ee8a0;text-shadow:0 0 22px #2fe07a,0 0 70px #2fe07a88;}
+  .overlay h1.lose{color:#ff5c5c;text-shadow:0 0 22px #ff3b3b,0 0 70px #d00;}
+  .overlay h1.draw{color:#00d4ff;text-shadow:0 0 22px #00d4ff,0 0 70px #0088ff;}
+  .overlay .sub{font-size:15px;color:#9fd6ff;letter-spacing:2px;}
+  .overlay p{max-width:560px;line-height:1.7;color:#bcd8ef;font-size:14px;margin:2px 0;}
+  .overlay .scoreLine{font-size:20px;color:#ffe066;font-weight:700;}
+  .overlay kbd{background:#0d1b33;border:1px solid #3a5f8f;border-bottom-width:3px;border-radius:6px;
+    padding:1px 7px;font-family:inherit;font-size:12px;color:#cfe8ff;}
+
+  /* Sélection de difficulté */
+  .diffs{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:10px;
+    width:min(640px,92vw);margin-top:6px;}
+  .diff{display:flex;flex-direction:column;gap:4px;align-items:center;justify-content:center;
+    padding:14px 10px;border-radius:14px;cursor:pointer;color:#d9ecff;font-size:15px;font-weight:700;
+    background:rgba(255,255,255,.05);border:2px solid rgba(255,255,255,.14);
+    transition:transform .1s,border-color .15s,box-shadow .15s;}
+  .diff .ico{font-size:26px;line-height:1;}
+  .diff .desc{font-size:10.5px;font-weight:500;color:#8fb6dd;line-height:1.35;min-height:28px;}
+  .diff:hover{transform:translateY(-2px);border-color:rgba(0,212,255,.5);}
+  .diff.sel{border-color:#00d4ff;box-shadow:0 0 18px #00d4ff66;color:#fff;background:rgba(0,212,255,.12);}
+
+  .actions{display:flex;flex-direction:column;align-items:center;gap:6px;}
+  #startBtn{margin-top:10px;padding:14px 40px;font-size:17px;font-weight:700;letter-spacing:1px;
+    color:#031018;background:linear-gradient(180deg,#8af7b8,#2fd07a);border:none;border-radius:12px;
+    cursor:pointer;box-shadow:0 0 22px #2fd07a88;transition:transform .1s, box-shadow .1s;}
+  #startBtn:hover{transform:translateY(-2px);box-shadow:0 0 30px #2fd07acc;}
+  #menuBtn{padding:11px 30px;font-size:14px;font-weight:700;letter-spacing:1px;
+    color:#cfe8ff;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.25);
+    border-radius:12px;cursor:pointer;transition:transform .1s,border-color .15s;}
+  #menuBtn:hover{transform:translateY(-2px);border-color:#00d4ff;}
+
+  #pauseTag{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:6;font-size:40px;
+    font-weight:800;letter-spacing:8px;color:#fff;text-shadow:0 0 20px #000;pointer-events:none;
+    opacity:0;transition:opacity .15s;}
+  #pauseTag.on{opacity:.85;}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div class="brand">PUISSANCE 4</div>
+  <div id="turnWrap">
+    <span id="turnDisc"></span>
+    <span id="turnText">À toi de jouer</span>
+  </div>
+  <div id="statsWrap">
+    <span class="stat"><b id="stW">0</b> V</span>
+    <span class="stat"><b id="stD">0</b> N</span>
+    <span class="stat"><b id="stL">0</b> Déf</span>
+    <span id="diffChip"></span>
+  </div>
+</div>
+<div id="pauseTag">PAUSE</div>
+
+<div id="overlay" class="overlay">
+  <h1>PUISSANCE 4</h1>
+  <div class="sub">Affronte l'ordinateur</div>
+  <div class="diffs" id="diffs">
+    <button class="diff" data-d="0"><span class="ico">😀</span>Facile<span class="desc">L'ordinateur joue souvent au hasard</span></button>
+    <button class="diff" data-d="1"><span class="ico">😐</span>Moyen<span class="desc">Parfait pour apprendre</span></button>
+    <button class="diff" data-d="2"><span class="ico">😈</span>Difficile<span class="desc">Il calcule plusieurs coups d'avance</span></button>
+    <button class="diff" data-d="3"><span class="ico">🤖</span>Maître<span class="desc">Quasi imbattable, à vos risques !</span></button>
+  </div>
+  <p></p>
+  <div class="actions">
+    <button id="startBtn">▶ Jouer</button>
+    <button id="menuBtn" style="display:none">☰ Menu</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const hud = document.getElementById('hud');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const menuBtn = document.getElementById('menuBtn');
+  const diffsDiv = document.getElementById('diffs');
+  const turnDisc = document.getElementById('turnDisc');
+  const turnText = document.getElementById('turnText');
+  const stW = document.getElementById('stW');
+  const stD = document.getElementById('stD');
+  const stL = document.getElementById('stL');
+  const diffChip = document.getElementById('diffChip');
+  const pauseTag = document.getElementById('pauseTag');
+
+  const COLS = 7, ROWS = 6;
+  const P = 1, A = 2;                     // P = joueur, A = ordinateur
+  const WIN = 10000000;
+  const VAL = [0, 1, 10, 100, 1000000];   // valeur d'une fenêtre selon nb de jetons
+  const IS_TOUCH = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+
+  // 4 niveaux de difficulté
+  const DIFFS = [
+    { name:'Facile',    icon:'😀', depth:2, random:0.45 },
+    { name:'Moyen',     icon:'😐', depth:4, random:0.15 },
+    { name:'Difficile', icon:'😈', depth:6, random:0.05 },
+    { name:'Maître',    icon:'🤖', depth:8, random:0.00 },
+  ];
+
+  const COLORS = {
+    [P]: { hi:'#fff3b0', mid:'#ffd54f', lo:'#f57f17', glow:'255,200,60' },
+    [A]: { hi:'#ffb3b3', mid:'#ff6b6b', lo:'#b71c1c', glow:'255,90,90' },
+  };
+
+  // ---------- État ----------
+  let grid = Array.from({length:COLS}, () => []);  // grid[c] = pile de jetons, index 0 = bas
+  let state = 'menu';                              // menu | play | over
+  let difficulty = 1;
+  let turn = P;
+  let stats = {w:0, d:0, l:0};
+  let sel = 3;                                     // colonne sélectionnée
+  let falling = null;                              // {col,row,player,fromY,toY}
+  let fallT = 0;
+  let FALL_DUR = 300;
+  let lastDrop = null;                             // {col,row,player}
+  let paused = false;
+  let winCells = null;
+  let winAt = 0;
+  let lastTime = 0;
+
+  // ---------- Mise en page ----------
+  let dpr = 1, cell = 0, holeR = 0, frame = 0, bx = 0, by = 0, ghostCy = 0;
+  const HUD_H = 56, PAD = 10;
+
+  function layout(){
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    const w = innerWidth, h = innerHeight;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const hintH = 26;
+    const availW = w - PAD * 2;
+    const availH = h - HUD_H - hintH;
+    cell = Math.floor(Math.min(availW / (COLS + 0.5), availH / (ROWS + 1.7)));
+    cell = Math.max(16, Math.min(cell, 74));
+    holeR = cell * 0.44;
+    frame = Math.max(7, Math.round(cell * 0.32));
+
+    const boardW = COLS * cell;
+    const boardH = ROWS * cell;
+    bx = Math.floor((w - boardW) / 2);
+    const minTop = HUD_H + Math.round(cell * 1.2);          // place pour le jeton fantôme
+    const availBelow = h - minTop - hintH;
+    by = minTop + Math.max(0, Math.round((availBelow - boardH) / 2));
+    ghostCy = by - Math.round(cell * 0.85);
+  }
+  window.addEventListener('resize', layout);
+
+  // ---------- Aide plateau ----------
+  function holeCX(c){ return bx + c * cell + cell / 2; }
+  function holeCY(r){ return by + (ROWS - 1 - r) * cell + cell / 2; }
+  function cellAt(c, r){ return (grid[c] && r < grid[c].length) ? grid[c][r] : 0; }
+  function canDrop(c){ return grid[c].length < ROWS; }
+  function getMoves(){
+    const m = [];
+    for (let c = 0; c < COLS; c++) if (canDrop(c)) m.push(c);
+    return m;
+  }
+  function orderMoves(moves){
+    const mid = (COLS - 1) / 2;
+    return moves.slice().sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid));
+  }
+
+  // ---------- Détection de victoire ----------
+  function checkWinAt(c, r, player){
+    const dirs = [[1,0],[0,1],[1,1],[1,-1]];
+    for (const [dx, dy] of dirs){
+      let count = 1;
+      for (let i = 1; i < 4; i++){
+        const cc = c + dx * i, rr = r + dy * i;
+        if (cc < 0 || cc >= COLS || rr < 0 || rr >= ROWS || cellAt(cc, rr) !== player) break;
+        count++;
+      }
+      for (let i = 1; i < 4; i++){
+        const cc = c - dx * i, rr = r - dy * i;
+        if (cc < 0 || cc >= COLS || rr < 0 || rr >= ROWS || cellAt(cc, rr) !== player) break;
+        count++;
+      }
+      if (count >= 4) return true;
+    }
+    return false;
+  }
+
+  function winLine(c, r, player){
+    const dirs = [[1,0],[0,1],[1,1],[1,-1]];
+    for (const [dx, dy] of dirs){
+      const cells = [[c, r]];
+      for (const s of [1, -1]){
+        for (let i = 1; i < 4; i++){
+          const cc = c + dx * i * s, rr = r + dy * i * s;
+          if (cc < 0 || cc >= COLS || rr < 0 || rr >= ROWS || cellAt(cc, rr) !== player) break;
+          cells.push([cc, rr]);
+        }
+      }
+      if (cells.length >= 4) return cells;
+    }
+    return null;
+  }
+
+  // ---------- IA : évaluation + minimax ----------
+  function evaluate(me){
+    let score = 0;
+    const center = Math.floor(COLS / 2);
+    for (let r = 0; r < ROWS; r++){
+      const v = cellAt(center, r);
+      if (v === me) score += 6;
+      else if (v === 3 - me) score -= 6;
+    }
+    const dirs = [[1,0],[0,1],[1,1],[1,-1]];
+    for (const [dx, dy] of dirs){
+      for (let c = 0; c < COLS; c++){
+        for (let r = 0; r < ROWS; r++){
+          const ec = c + 3 * dx, er = r + 3 * dy;
+          if (ec < 0 || ec >= COLS || er < 0 || er >= ROWS) continue;
+          let mine = 0, opp = 0;
+          for (let i = 0; i < 4; i++){
+            const v = cellAt(c + dx * i, r + dy * i);
+            if (v === me) mine++;
+            else if (v === 3 - me) opp++;
+          }
+          if (mine > 0 && opp > 0) continue;          // fenêtre bouchée
+          if (mine > 0) score += VAL[mine];
+          else if (opp > 0) score -= VAL[opp];
+        }
+      }
+    }
+    return score;
+  }
+
+  function minimax(depth, alpha, beta, isAi){
+    const player = isAi ? A : P;
+    const moves = getMoves();
+    // victoire immédiate pour le joueur dont c'est le tour
+    for (const c of moves){
+      const r = grid[c].length;
+      grid[c].push(player);
+      const win = checkWinAt(c, r, player);
+      grid[c].pop();
+      if (win) return isAi ? WIN + depth : -(WIN + depth);
+    }
+    if (depth === 0) return evaluate(A);
+    if (moves.length === 0) return 0;                 // match nul
+
+    if (isAi){
+      let best = -Infinity;
+      for (const c of orderMoves(moves)){
+        grid[c].push(A);
+        const val = minimax(depth - 1, alpha, beta, false);
+        grid[c].pop();
+        if (val > best) best = val;
+        if (best > alpha) alpha = best;
+        if (alpha >= beta) break;
+      }
+      return best;
+    } else {
+      let best = Infinity;
+      for (const c of orderMoves(moves)){
+        grid[c].push(P);
+        const val = minimax(depth - 1, alpha, beta, true);
+        grid[c].pop();
+        if (val < best) best = val;
+        if (best < beta) beta = best;
+        if (alpha >= beta) break;
+      }
+      return best;
+    }
+  }
+
+  function computeAIMove(depth){
+    const moves = getMoves();
+    let bestVal = -Infinity, best = [];
+    for (const c of orderMoves(moves)){
+      grid[c].push(A);
+      const val = minimax(depth - 1, -Infinity, Infinity, false);
+      grid[c].pop();
+      if (val > bestVal){ bestVal = val; best = [c]; }
+      else if (val === bestVal) best.push(c);
+    }
+    return best[Math.floor(Math.random() * best.length)];
+  }
+
+  function aiChoose(){
+    const moves = getMoves();
+    if (!moves.length) return -1;
+    const d = DIFFS[difficulty];
+    if (Math.random() < d.random){                    // coup aléatoire pour les niveaux faciles
+      return moves[Math.floor(Math.random() * moves.length)];
+    }
+    return computeAIMove(d.depth);
+  }
+
+  // ---------- Score en localStorage ----------
+  function statsKey(){ return 'p4.stats.' + difficulty; }
+  function loadStats(){
+    try{
+      const s = JSON.parse(localStorage.getItem(statsKey()) || '{}');
+      stats = {w: s.w || 0, d: s.d || 0, l: s.l || 0};
+    }catch(e){ stats = {w:0, d:0, l:0}; }
+  }
+  function saveStats(){
+    try{ localStorage.setItem(statsKey(), JSON.stringify(stats)); }catch(e){}
+  }
+
+  // ---------- Écrans ----------
+  function setDifficulty(d){
+    difficulty = d;
+    diffsDiv.querySelectorAll('.diff').forEach((b, i) => b.classList.toggle('sel', i === d));
+    loadStats();
+    updateStats();
+  }
+
+  function showMenu(){
+    state = 'menu';
+    hud.classList.add('hidden');
+    overlay.classList.remove('hidden');
+    overlay.classList.remove('over');
+    overlay.querySelector('h1').textContent = 'PUISSANCE 4';
+    overlay.querySelector('h1').className = '';
+    overlay.querySelector('.sub').textContent = 'Affronte l\'ordinateur';
+    overlay.querySelector('p').innerHTML =
+      'Tu joues <b style="color:#ffd54f">jaune</b>, l\'ordinateur <b style="color:#ff6b6b">rouge</b>.<br/>' +
+      'Aligne <b>4 jetons</b> (ligne, colonne ou diagonale) pour gagner.<br/>' +
+      (IS_TOUCH
+        ? 'Tape une colonne pour y laisser tomber un jeton.'
+        : 'Clique une colonne, ou utilise <kbd>←</kbd> <kbd>→</kbd> pour viser et <kbd>Espace</kbd> pour lâcher.');
+    startBtn.textContent = '▶ Jouer';
+    menuBtn.style.display = 'none';
+    setDifficulty(difficulty);
+  }
+
+  function startGame(){
+    grid = Array.from({length:COLS}, () => []);
+    turn = P;
+    state = 'play';
+    paused = false;
+    falling = null; lastDrop = null; fallT = 0;
+    winCells = null;
+    sel = Math.floor(COLS / 2);
+    hud.classList.remove('hidden');
+    overlay.classList.add('hidden');
+    pauseTag.classList.remove('on');
+    loadStats();
+    updateTurn();
+    updateStats();
+    beep('click');
+  }
+
+  function gameOver(winner, col, row){
+    state = 'over';
+    winCells = (winner === P || winner === A) ? winLine(col, row, winner) : null;
+    winAt = performance.now();
+    if (winner === P) stats.w++;
+    else if (winner === A) stats.l++;
+    else stats.d++;
+    saveStats();
+    updateStats();
+    hud.classList.add('hidden');
+    beep(winner === P ? 'win' : winner === A ? 'lose' : 'draw');
+    setTimeout(function(){ showGameOver(winner); }, 650);   // laisse voir le plateau final
+  }
+
+  function showGameOver(winner){
+    overlay.classList.remove('hidden');
+    overlay.classList.add('over');
+    const h1 = overlay.querySelector('h1');
+    const sub = overlay.querySelector('.sub');
+    const p = overlay.querySelector('p');
+    if (winner === P){ h1.textContent = 'VICTOIRE !'; h1.className = 'win'; }
+    else if (winner === A){ h1.textContent = 'DÉFAITE'; h1.className = 'lose'; }
+    else { h1.textContent = 'ÉGALITÉ'; h1.className = 'draw'; }
+    sub.textContent = 'Niveau : ' + DIFFS[difficulty].icon + ' ' + DIFFS[difficulty].name;
+    p.innerHTML =
+      '<span class="scoreLine">' +
+      (winner === P ? 'Bravo, tu as gagné ! 🏆'
+        : winner === A ? 'L\'ordinateur gagne cette manche…'
+        : 'Personne ne gagne, personne ne perd !') +
+      '</span><br/>' +
+      'Scores — <b>V</b> : ' + stats.w + ' · <b>N</b> : ' + stats.d + ' · <b>Déf</b> : ' + stats.l +
+      '<br/>Choisis un niveau puis rejoue, ou retourne au menu.';
+    startBtn.textContent = '↻ Rejouer';
+    menuBtn.style.display = '';
+    setDifficulty(difficulty);
+  }
+
+  // ---------- Déroulement ----------
+  function doDrop(col, player){
+    const row = grid[col].push(player) - 1;
+    lastDrop = {col, row, player};
+    falling = {col, row, player, fromY: ghostCy, toY: holeCY(row)};
+    fallT = 0;
+    FALL_DUR = Math.min(480, 180 + row * 70);
+    beep('drop');
+  }
+
+  function playerDrop(col){
+    if (state !== 'play' || paused || falling || turn !== P) return;
+    if (!canDrop(col)) return;
+    doDrop(col, P);
+  }
+
+  function finishFall(){
+    falling = null;
+    const {col, row, player} = lastDrop;
+    lastDrop = null;
+    if (checkWinAt(col, row, player)){ gameOver(player, col, row); return; }
+    if (getMoves().length === 0){ gameOver(0, col, row); return; }
+    if (player === P){ turn = A; updateTurn(); aiThink(); }
+    else { turn = P; updateTurn(); }
+  }
+
+  function aiThink(){
+    if (state !== 'play') return;
+    const d = DIFFS[difficulty];
+    const delay = 420 + d.depth * 80;                 // petit temps de « réflexion »
+    setTimeout(function(){
+      if (state !== 'play') return;
+      if (paused){ aiThink(); return; }
+      const col = aiChoose();
+      if (col < 0){ gameOver(0, 0, 0); return; }
+      doDrop(col, A);
+    }, delay);
+  }
+
+  function togglePause(){
+    if (state !== 'play' || falling) return;
+    paused = !paused;
+    pauseTag.classList.toggle('on', paused);
+  }
+
+  // ---------- HUD ----------
+  function updateTurn(){
+    if (state !== 'play') return;
+    turnDisc.className = turn === P ? 'p' : 'a';
+    turnText.textContent = turn === P ? 'À toi de jouer !' : 'L\'ordinateur réfléchit…';
+  }
+  function updateStats(){
+    stW.textContent = stats.w;
+    stD.textContent = stats.d;
+    stL.textContent = stats.l;
+    diffChip.textContent = DIFFS[difficulty].icon + ' ' + DIFFS[difficulty].name;
+  }
+
+  // ---------- Entrées ----------
+  function colFromEvent(e){
+    const rect = canvas.getBoundingClientRect();
+    return Math.floor((e.clientX - rect.left - bx) / cell);
+  }
+
+  canvas.addEventListener('pointermove', function(e){
+    if (state !== 'play') return;
+    const col = colFromEvent(e);
+    if (col >= 0 && col < COLS) sel = col;
+  });
+
+  canvas.addEventListener('pointerdown', function(e){
+    ensureAudio();
+    if (state !== 'play' || paused) return;
+    const col = colFromEvent(e);
+    if (col < 0 || col >= COLS) return;
+    sel = col;
+    playerDrop(col);
+  }, {passive:false});
+
+  document.addEventListener('keydown', function(e){
+    const k = e.key;
+    if (state === 'menu'){
+      if (k === 'Enter'){ e.preventDefault(); startGame(); }
+      return;
+    }
+    if (state === 'over'){
+      if (k === 'Enter' || k === ' '){ e.preventDefault(); startGame(); }
+      return;
+    }
+    if (k === 'ArrowLeft'){ e.preventDefault(); sel = Math.max(0, sel - 1); }
+    else if (k === 'ArrowRight'){ e.preventDefault(); sel = Math.min(COLS - 1, sel + 1); }
+    else if (k === 'ArrowDown' || k === ' ' || k === 'Enter'){
+      e.preventDefault();
+      playerDrop(sel);
+    }
+    else if (k >= '1' && k <= '7'){
+      sel = +k - 1;
+      playerDrop(sel);
+    }
+    else if (k === 'p' || k === 'P' || k === 'Escape'){ togglePause(); }
+  });
+
+  startBtn.addEventListener('click', function(){ ensureAudio(); startGame(); });
+  menuBtn.addEventListener('click', function(){ ensureAudio(); showMenu(); });
+  diffsDiv.querySelectorAll('.diff').forEach(function(b, i){
+    b.addEventListener('click', function(){ ensureAudio(); setDifficulty(i); beep('click'); });
+  });
+
+  // ---------- Audio ----------
+  let actx = null;
+  function ensureAudio(){
+    try{
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume();
+    }catch(e){}
+  }
+  function tone(freq, start, dur, type, vol){
+    try{
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = type; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol, start);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      o.connect(g).connect(actx.destination);
+      o.start(start); o.stop(start + dur + 0.02);
+    }catch(e){}
+  }
+  function beep(kind){
+    try{
+      ensureAudio();
+      const t0 = actx.currentTime;
+      if (kind === 'drop'){
+        tone(220, t0, 0.12, 'triangle', 0.16);
+        tone(110, t0 + 0.02, 0.1, 'sine', 0.12);
+      } else if (kind === 'click'){
+        tone(520, t0, 0.06, 'sine', 0.1);
+      } else if (kind === 'win'){
+        [523, 659, 784, 1047].forEach((f, i) => tone(f, t0 + i * 0.09, 0.16, 'triangle', 0.12));
+      } else if (kind === 'lose'){
+        [392, 330, 262, 196].forEach((f, i) => tone(f, t0 + i * 0.11, 0.18, 'sine', 0.12));
+      } else if (kind === 'draw'){
+        [440, 440].forEach((f, i) => tone(f, t0 + i * 0.12, 0.14, 'sine', 0.1));
+      }
+    }catch(e){}
+  }
+  document.addEventListener('pointerdown', ensureAudio, {once:true});
+
+  // ---------- Dessin ----------
+  function rr(x, y, w, h, r){
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawDisc(cx, cy, r, p, alpha){
+    const C = COLORS[p];
+    ctx.globalAlpha = alpha;
+    const g = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.42, r * 0.1, cx, cy, r * 1.05);
+    g.addColorStop(0, C.hi);
+    g.addColorStop(0.55, C.mid);
+    g.addColorStop(1, C.lo);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.beginPath(); ctx.ellipse(cx - r * 0.32, cy - r * 0.4, r * 0.26, r * 0.16, -0.7, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  function drawGlow(cx, cy, r, p, a){
+    const C = COLORS[p];
+    const g = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r * 1.7);
+    g.addColorStop(0, 'rgba(' + C.glow + ',' + a + ')');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(cx, cy, r * 1.7, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawBoard(){
+    const fr = frame;
+    const x = bx - fr, y = by - fr, w = COLS * cell + fr * 2, h = ROWS * cell + fr * 2;
+    // ombre portée
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    rr(x + 3, y + 5, w, h, fr); ctx.fill();
+    // cadre
+    const g = ctx.createLinearGradient(x, y, x, y + h);
+    g.addColorStop(0, '#1b5da6');
+    g.addColorStop(0.5, '#0e3a73');
+    g.addColorStop(1, '#071e3d');
+    ctx.fillStyle = g;
+    rr(x, y, w, h, fr); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,212,255,0.4)';
+    ctx.lineWidth = 1.5;
+    rr(x, y, w, h, fr); ctx.stroke();
+
+    // surbrillance de la colonne visée
+    if (state === 'play' && turn === P && !falling && !paused){
+      ctx.fillStyle = 'rgba(0,212,255,0.10)';
+      ctx.fillRect(bx + sel * cell, by, cell, ROWS * cell);
+    }
+
+    // trous
+    for (let c = 0; c < COLS; c++){
+      for (let r = 0; r < ROWS; r++){
+        const cx = holeCX(c), cy = holeCY(r);
+        const hg = ctx.createRadialGradient(cx, cy, holeR * 0.2, cx, cy, holeR);
+        hg.addColorStop(0, '#020a16');
+        hg.addColorStop(1, '#061426');
+        ctx.fillStyle = hg;
+        ctx.beginPath(); ctx.arc(cx, cy, holeR, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'rgba(120,180,255,0.12)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(cx, cy, holeR, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+  }
+
+  function drawDiscs(){
+    for (let c = 0; c < COLS; c++){
+      for (let r = 0; r < grid[c].length; r++){
+        if (falling && falling.col === c && falling.row === r) continue; // jeton en chute
+        const p = grid[c][r];
+        const cx = holeCX(c), cy = holeCY(r);
+        drawGlow(cx, cy, holeR * 0.9, p, 0.35);
+        drawDisc(cx, cy, holeR * 0.86, p, 1);
+      }
+    }
+  }
+
+  function drawFalling(){
+    const t = Math.min(1, fallT / FALL_DUR);
+    const eased = t * t;                              // accélération (gravité)
+    const y = falling.fromY + (falling.toY - falling.fromY) * eased;
+    const x = holeCX(falling.col);
+    drawGlow(x, y, holeR, falling.player, 0.4);
+    drawDisc(x, y, holeR * 0.86, falling.player, 1);
+  }
+
+  function drawGhost(now){
+    const bob = Math.sin(now / 180) * cell * 0.06;
+    const pulse = 0.65 + 0.25 * Math.sin(now / 220);
+    drawDisc(holeCX(sel), ghostCy + bob, holeR * 0.8, P, pulse);
+  }
+
+  function drawWinRings(now){
+    if (state !== 'over' || !winCells) return;
+    const t = (now - winAt) / 1000;
+    const a = 0.45 + 0.4 * Math.sin(t * 5);
+    ctx.strokeStyle = 'rgba(255,255,255,' + a.toFixed(3) + ')';
+    ctx.lineWidth = Math.max(2, cell * 0.08);
+    for (const [c, r] of winCells){
+      ctx.beginPath(); ctx.arc(holeCX(c), holeCY(r), holeR * 0.98, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+
+  function drawHint(){
+    if (state !== 'play') return;
+    ctx.fillStyle = 'rgba(159,214,255,0.55)';
+    ctx.font = Math.max(11, Math.round(cell * 0.32)) + 'px "Segoe UI", Roboto, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(
+      IS_TOUCH ? 'Tape une colonne pour y laisser tomber un jeton'
+               : 'Clique une colonne · ← → viser · Espace lâcher · P pause',
+      innerWidth / 2, innerHeight - 10);
+  }
+
+  function draw(now){
+    const w = innerWidth, h = innerHeight;
+    const bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#050e1c');
+    bg.addColorStop(1, '#0a1f33');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    drawBoard();
+    drawDiscs();
+    if (falling) drawFalling();
+    if (state === 'play' && turn === P && !paused && !falling) drawGhost(now);
+    drawWinRings(now);
+    drawHint();
+  }
+
+  // ---------- Boucle ----------
+  function loop(now){
+    requestAnimationFrame(loop);
+    const dt = Math.min(100, now - lastTime);
+    lastTime = now;
+    if (state === 'play' && !paused && falling){
+      fallT += dt;
+      if (fallT >= FALL_DUR) finishFall();
+    }
+    draw(now);
+  }
+
+  // ---------- Init ----------
+  layout();
+  showMenu();
+  requestAnimationFrame(function(now){ lastTime = now; requestAnimationFrame(loop); });
+})();
+</script>
+</body>
+</html>
