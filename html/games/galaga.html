@@ -95,8 +95,13 @@
   function resize(){
     dpr = Math.max(1, window.devicePixelRatio || 1);
     cssW = window.innerWidth; cssH = window.innerHeight;
+    // Taille du tampon de dessin (net en haut DPR)…
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
+    // …mais l'élément est affiché à la taille du viewport (sinon le canvas
+    // déborde de l'écran sur tablette/téléphone où le DPR est > 1).
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
     sc = Math.min(cssW / W, cssH / H);
     ox = (cssW - W * sc) / 2;
     oy = (cssH - H * sc) / 2;
