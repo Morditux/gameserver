@@ -1,0 +1,37 @@
+# Déploiement du serveur de jeux HTML5.
+#
+# Usage :
+#   docker compose up -d --build   # construire l'image et démarrer
+#   docker compose logs -f         # suivre les journaux
+#   docker compose down            # arrêter et supprimer le conteneur
+
+services:
+  gameserver:
+    build: .
+    image: gameserver:latest
+    container_name: gameserver
+    restart: unless-stopped
+
+    # L'image ne déclare pas d'EXPOSE : le port est publié ici.
+    # Derrière un reverse proxy, restreindre l'écoute au loopback :
+    #   ports: ["127.0.0.1:8080:8080"]
+    ports:
+      - "8080:8080"
+
+    environment:
+      HOST: "0.0.0.0" # écoute sur toutes les interfaces du conteneur
+      PORT: "8080"
+
+    # Durcissement : le serveur ne fait que servir des fichiers statiques,
+    # le système de fichiers est donc monté en lecture seule et le conteneur
+    # tourne sans privilèges (déjà en utilisateur non-root dans l'image).
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:$${PORT}/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
