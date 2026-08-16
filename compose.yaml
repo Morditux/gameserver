@@ -9,14 +9,10 @@ services:
   gameserver:
     build: .
     image: gameserver:latest
-    container_name: gameserver
+    container_name: games
     restart: unless-stopped
-
-    # L'image ne déclare pas d'EXPOSE : le port est publié ici.
-    # Derrière un reverse proxy, restreindre l'écoute au loopback :
-    #   ports: ["127.0.0.1:8080:8080"]
-    ports:
-      - "8080:8080"
+    networks:
+      - appnetwork
 
     environment:
       HOST: "0.0.0.0" # écoute sur toutes les interfaces du conteneur
@@ -35,3 +31,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+# Réseau partagé avec le reverse proxy.
+# Il doit être créé au préalable : docker network create appnetwork
+networks:
+  appnetwork:
+    external: true
