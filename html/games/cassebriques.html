@@ -657,6 +657,11 @@
   let prestigeLoop = 0;
   let combo = 0;
   let screenShake = 0;
+  let levelClearPending = false;
+  let levelTransitionTimer = 0;
+  let levelBannerText = '';
+  let levelBannerTimer = 0;
+  let stuckLaunchTimer = 0;
 
   // Raquette
   const paddle = {
@@ -755,6 +760,8 @@
     fireballTimer = 0;
     slowTimer = 0;
     combo = 0;
+    levelBannerText = `NIVEAU ${idx + 1} : ${lvl.name.toUpperCase()}`;
+    levelBannerTimer = 2.4;
     updateHud();
   }
 
@@ -763,6 +770,7 @@
     paddle.w = paddle.baseW;
     paddle.expandTimer = 0;
     paddle.laserTimer = 0;
+    stuckLaunchTimer = 0;
 
     // 1 bille collée à la raquette
     balls = [{
@@ -777,8 +785,9 @@
   }
 
   function launchBall(b){
-    if (!b.stuck) return;
+    if (!b || !b.stuck) return;
     b.stuck = false;
+    stuckLaunchTimer = 0;
     const speed = (380 + (currentLevelIdx + prestigeLoop * 5) * 16) * (slowTimer > 0 ? 0.72 : 1);
     // Légère inclinaison aléatoire ou selon déplacement du paddle
     const angle = (Math.random() * 0.4 - 0.2) + (paddle.vx !== 0 ? (paddle.vx > 0 ? 0.25 : -0.25) : 0);
@@ -911,14 +920,21 @@
       color: '#ff2255'
     });
 
-    // Détruire les briques dans un rayon de 95px
+    // Collecter d'abord les cibles sans modifier l'array bricks en cours d'itération
     const radius = 95;
-    for (let i = bricks.length - 1; i >= 0; i--) {
+    const targets = [];
+    for (let i = 0; i < bricks.length; i++) {
       const b = bricks[i];
+      if (!b || b.metal) continue;
       const cx = b.x + b.w / 2;
       const cy = b.y + b.h / 2;
-      const d = Math.hypot(cx - ex, cy - ey);
-      if (d < radius && !b.metal) {
+      if (Math.hypot(cx - ex, cy - ey) < radius) {
+        targets.push(b);
+      }
+    }
+
+    for (const b of targets) {
+      if (bricks.includes(b)) {
         destroyBrick(b, true);
       }
     }
@@ -1014,22 +1030,23 @@
   }
 
   function checkLevelClear(){
+    if (levelClearPending) return;
     const remaining = bricks.filter(b => !b.metal).length;
     if (remaining === 0) {
+      levelClearPending = true;
+      levelTransitionTimer = 1.6;
       playSound('win');
-      if (currentLevelIdx + 1 < LEVELS.length) {
-        loadLevel(currentLevelIdx + 1);
-      } else {
-        // Tous les niveaux terminés -> Victoire ou boucle prestige
-        winOverlay.classList.remove('hidden');
-        state = 'win';
-        winScoreEl.textContent = `Score final : ${score}`;
-        if (score >= highScore) {
-          winRecordMsg.textContent = '★ NOUVEAU RECORD ÉTABLI ! ★';
-        } else {
-          winRecordMsg.textContent = `Record actuel : ${highScore}`;
-        }
-      }
+      addScore(1000, W / 2, H / 2);
+      floaters.push({
+        text: 'SECTEUR PURIFIÉ ! +1000',
+        x: W / 2,
+        y: H / 2 - 20,
+        vy: -35,
+        alpha: 1.8,
+        color: '#00ffaa'
+      });
+      spawnParticles(W / 2, H / 3, '#00f0ff', 35, 2.5);
+      spawnParticles(W / 2, H / 3, '#ff00aa', 35, 2.5);
     }
   }
 
@@ -1053,6 +1070,31 @@
 
     if (screenShake > 0) {
       screenShake = Math.max(0, screenShake - dt * 25);
+    }
+
+    if (levelBannerTimer > 0) {
+      levelBannerTimer -= dt;
+    }
+
+    // Transition de fin de niveau différée (exécutée proprement hors de la physique)
+    if (levelClearPending) {
+      levelTransitionTimer -= dt;
+      if (levelTransitionTimer <= 0) {
+        levelClearPending = false;
+        if (currentLevelIdx + 1 < LEVELS.length) {
+          loadLevel(currentLevelIdx + 1);
+        } else {
+          // Tous les niveaux terminés -> Écran de Victoire
+          winOverlay.classList.remove('hidden');
+          state = 'win';
+          winScoreEl.textContent = `Score final : ${score}`;
+          if (score >= highScore) {
+            winRecordMsg.textContent = '★ NOUVEAU RECORD ÉTABLI ! ★';
+          } else {
+            winRecordMsg.textContent = `Record actuel : ${highScore}`;
+          }
+        }
+      }
     }
 
     if (state !== 'play') return;
@@ -1100,10 +1142,21 @@
       paddle.x = W - 12 - halfW;
     }
 
+    // Si une bille est collée à la raquette : auto-lancement après 3.2 secondes pour ne jamais bloquer
+    const hasStuckBall = balls.some(b => b && b.stuck);
+    if (hasStuckBall && !levelClearPending) {
+      stuckLaunchTimer += dt;
+      if (stuckLaunchTimer >= 3.2) {
+        balls.forEach(b => {
+          if (b && b.stuck) launchBall(b);
+        });
+      }
+    }
+
     // Tir manuel si touche Espace ou tir
     if (keys.fire) {
       balls.forEach(b => {
-        if (b.stuck) launchBall(b);
+        if (b && b.stuck) launchBall(b);
       });
       if (paddle.laserTimer > 0 && paddle.laserShootTimer >= 0.2) {
         paddle.laserShootTimer = 0;
@@ -1114,6 +1167,7 @@
     // Gestion des Lasers
     for (let i = lasers.length - 1; i >= 0; i--) {
       const l = lasers[i];
+      if (!l) continue;
       l.y += l.vy * dt;
       if (l.y < TOP_PLAY_Y) {
         lasers.splice(i, 1);
@@ -1122,6 +1176,7 @@
       // Collision laser avec les briques
       for (let j = bricks.length - 1; j >= 0; j--) {
         const b = bricks[j];
+        if (!b) continue;
         if (l.x >= b.x && l.x <= b.x + b.w && l.y >= b.y && l.y <= b.y + b.h) {
           hitBrick(b, null);
           lasers.splice(i, 1);
@@ -1133,6 +1188,7 @@
     // Gestion des capsules de bonus
     for (let i = powerups.length - 1; i >= 0; i--) {
       const p = powerups[i];
+      if (!p) continue;
       p.y += p.vy * dt;
 
       // Contact avec la raquette
@@ -1154,6 +1210,7 @@
     // Gestion des billes
     for (let i = balls.length - 1; i >= 0; i--) {
       const b = balls[i];
+      if (!b) continue;
 
       if (b.stuck) {
         b.x = paddle.x;
@@ -1193,7 +1250,7 @@
         shieldActive = false; // Consommé
         playSound('paddle', 0);
         screenShake = 6;
-        floaters.push({ text: 'BOUCLIER CONOMMÉ !', x: W / 2, y: H - 40, vy: -30, alpha: 1, color: '#3388ff' });
+        floaters.push({ text: 'BOUCLIER CONSOMMÉ !', x: W / 2, y: H - 40, vy: -30, alpha: 1, color: '#3388ff' });
       }
 
       // Rebond sur la raquette
@@ -1224,6 +1281,7 @@
       // Collisions avec les briques (Circle-Rect AABB)
       for (let j = bricks.length - 1; j >= 0; j--) {
         const br = bricks[j];
+        if (!br) continue;
 
         // Boîte englobante
         const closestX = Math.max(br.x, Math.min(b.x, br.x + br.w));
@@ -1256,8 +1314,8 @@
       }
     }
 
-    // Si toutes les billes sont tombées
-    if (balls.length === 0) {
+    // Si toutes les billes sont tombées (et pas en transition de fin de niveau)
+    if (balls.length === 0 && !levelClearPending) {
       lives--;
       updateHud();
       playSound('lost');
@@ -1545,6 +1603,58 @@
       ctx.restore();
     }
 
+    // Bannière de fin de secteur
+    if (levelClearPending) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(4, 8, 22, 0.85)';
+      ctx.fillRect(0, H / 2 - 65, W, 130);
+
+      ctx.shadowColor = '#00ffaa';
+      ctx.shadowBlur = 20;
+      ctx.fillStyle = '#00ffaa';
+      ctx.font = 'bold 28px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('★ SECTEUR PURIFIÉ ! ★', W / 2, H / 2 - 12);
+
+      ctx.shadowColor = '#00e5ff';
+      ctx.fillStyle = '#c8e8ff';
+      ctx.font = 'bold 15px sans-serif';
+      ctx.fillText('PRÉPARATION DU PROCHAIN SECTEUR...', W / 2, H / 2 + 26);
+      ctx.restore();
+    } else if (levelBannerTimer > 0) {
+      ctx.save();
+      const alpha = Math.min(1, levelBannerTimer);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = 'rgba(4, 8, 22, 0.8)';
+      ctx.fillRect(0, H / 2 - 50, W, 100);
+
+      ctx.shadowColor = '#00e5ff';
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = '#00f0ff';
+      ctx.font = 'bold 25px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(levelBannerText, W / 2, H / 2 - 6);
+
+      ctx.fillStyle = '#ffd54f';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText('BONUS +1000 PTS ACCORDÉ', W / 2, H / 2 + 24);
+      ctx.restore();
+    }
+
+    // Invite lumineuse pour lancer la bille si elle est collée à la raquette
+    const stuckBall = balls.find(b => b && b.stuck);
+    if (stuckBall && !levelClearPending && state === 'play') {
+      ctx.save();
+      const bounce = Math.sin(Date.now() / 140) * 4;
+      ctx.shadowColor = '#ffea00';
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = '#ffea00';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('▲ ESPACE OU CLIC POUR LANCER ▲', paddle.x, paddle.y - 34 + bounce);
+      ctx.restore();
+    }
+
     ctx.restore();
   }
 
@@ -1581,6 +1691,8 @@
     winOverlay.classList.add('hidden');
     pauseTag.classList.remove('on');
 
+    levelClearPending = false;
+    levelTransitionTimer = 0;
     score = 0;
     lives = 3;
     prestigeLoop = 0;
@@ -1592,6 +1704,8 @@
   retryBtn.addEventListener('click', startGame);
   restartBtn.addEventListener('click', () => {
     prestigeLoop++;
+    levelClearPending = false;
+    levelTransitionTimer = 0;
     loadLevel(0);
     winOverlay.classList.add('hidden');
     state = 'play';
