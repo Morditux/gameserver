@@ -1,0 +1,1665 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="description" content="CASSE-BRIQUES — Neon Breaker : brise les briques néon, active les super bonus et bats le record d'arcade."/>
+<meta name="theme-color" content="#060814"/>
+<title>Casse-Briques — Neon Breaker</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23080e22'/><rect x='15' y='25' width='70' height='20' rx='6' fill='%2300e5ff'/><circle cx='50' cy='68' r='14' fill='%23ff007f'/></svg>"/>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #050713;
+    font-family: 'Segoe UI', Roboto, -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #eaf6ff;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  canvas {
+    display: block;
+    touch-action: none;
+    cursor: default;
+  }
+
+  /* ---------- HUD ---------- */
+  #hud {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 10px 16px;
+    pointer-events: none;
+    z-index: 5;
+    background: linear-gradient(180deg, rgba(3, 6, 18, 0.85) 0%, rgba(3, 6, 18, 0) 100%);
+  }
+  #hud.hidden { display: none; }
+  #hud .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  #hud .label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #79a6d2;
+  }
+  #hud .value {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #ffffff;
+    text-shadow: 0 0 10px rgba(0, 229, 255, 0.4);
+  }
+  #hud #livesVal {
+    letter-spacing: 3px;
+    color: #ff3377;
+    text-shadow: 0 0 10px rgba(255, 51, 119, 0.6);
+  }
+  #hud .btnWrap {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    pointer-events: auto;
+  }
+  .hud-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    border: 1px solid rgba(120, 190, 255, 0.25);
+    background: rgba(20, 35, 65, 0.5);
+    color: #eaf6ff;
+    font-size: 17px;
+    text-decoration: none;
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: background 0.15s, transform 0.1s, border-color 0.15s;
+  }
+  .hud-btn:hover {
+    background: rgba(40, 80, 140, 0.7);
+    border-color: #00e5ff;
+    transform: translateY(-1px);
+  }
+  .hud-btn:active {
+    transform: scale(0.94);
+  }
+
+  /* ---------- Notification Pause ---------- */
+  #pauseTag {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 8;
+    font-size: 42px;
+    font-weight: 900;
+    letter-spacing: 8px;
+    color: #ffffff;
+    text-shadow: 0 0 20px #00e5ff, 0 0 50px rgba(0, 229, 255, 0.6);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease-out;
+  }
+  #pauseTag.on { opacity: 0.95; }
+
+  /* ---------- Écrans Superposés (Overlays) ---------- */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    background: radial-gradient(ellipse at center, rgba(10, 16, 38, 0.88), rgba(3, 5, 15, 0.96));
+    z-index: 10;
+    text-align: center;
+    padding: 24px;
+    backdrop-filter: blur(4px);
+  }
+  .overlay.hidden { display: none; }
+  .overlay h1 {
+    margin: 0;
+    font-size: clamp(34px, 7vw, 68px);
+    letter-spacing: 5px;
+    color: #00f0ff;
+    text-shadow: 0 0 22px #00e5ff, 0 0 60px rgba(0, 229, 255, 0.5);
+  }
+  .overlay.over h1 {
+    color: #ff3366;
+    text-shadow: 0 0 22px #ff1744, 0 0 60px rgba(255, 23, 68, 0.5);
+  }
+  .overlay.win h1 {
+    color: #ffe066;
+    text-shadow: 0 0 22px #ffd700, 0 0 60px rgba(255, 215, 0, 0.5);
+  }
+  .overlay .sub {
+    font-size: 16px;
+    color: #a4c9ff;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin: -4px 0 6px;
+  }
+  .overlay p {
+    max-width: 520px;
+    line-height: 1.6;
+    color: #cfe2ff;
+    font-size: 14.5px;
+    margin: 0;
+  }
+  .overlay .scoreLine {
+    font-size: 24px;
+    color: #ffd54f;
+    font-weight: 700;
+    text-shadow: 0 0 14px rgba(255, 213, 79, 0.5);
+  }
+  .overlay .newRecord {
+    font-size: 15px;
+    color: #00ffaa;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-shadow: 0 0 12px rgba(0, 255, 170, 0.6);
+  }
+  .overlay .legend {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    max-width: 580px;
+    margin-top: 4px;
+  }
+  .overlay .chip {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 18px;
+    padding: 5px 12px;
+    font-size: 12.5px;
+    color: #dbeaff;
+  }
+  .overlay .chip b {
+    color: #00f0ff;
+  }
+  .overlay kbd {
+    background: #09152b;
+    border: 1px solid #2d558a;
+    border-bottom-width: 3px;
+    border-radius: 6px;
+    padding: 2px 7px;
+    font-family: inherit;
+    font-size: 12px;
+    color: #bfe0ff;
+  }
+  .btn-group {
+    display: flex;
+    gap: 12px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .primary-btn {
+    padding: 13px 36px;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #040816;
+    background: linear-gradient(180deg, #5dfcff 0%, #00b4d8 100%);
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    box-shadow: 0 0 20px rgba(0, 229, 255, 0.5);
+    transition: transform 0.1s, box-shadow 0.15s;
+    text-decoration: none;
+  }
+  .primary-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 28px rgba(0, 229, 255, 0.8);
+  }
+  .secondary-btn {
+    padding: 13px 26px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #dbeaff;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .secondary-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: #00e5ff;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<!-- HUD Supérieur -->
+<div id="hud">
+  <div class="stat"><span class="label">Score</span><span class="value" id="score">0</span></div>
+  <div class="stat"><span class="label">Record</span><span class="value" id="record">0</span></div>
+  <div class="stat"><span class="label">Niveau</span><span class="value" id="level">1 / 5</span></div>
+  <div class="stat"><span class="label">Vies</span><span class="value" id="livesVal">❤️❤️❤️</span></div>
+  <div class="stat" id="comboWrap" style="display:none;"><span class="label">Combo</span><span class="value" id="comboVal" style="color:#ffcc00;">x1</span></div>
+
+  <div class="btnWrap">
+    <a href="/" class="hud-btn" id="homeBtn" title="Index des jeux [I]">🏠</a>
+    <button class="hud-btn" id="muteBtn" title="Couper / Activer le son [M]">🔊</button>
+    <button class="hud-btn" id="pauseBtn" title="Pause [P]">⏸</button>
+  </div>
+</div>
+
+<div id="pauseTag">PAUSE</div>
+
+<!-- Écran d'Accueil / Menu -->
+<div id="menuOverlay" class="overlay">
+  <h1>NEON BREAKER</h1>
+  <div class="sub">Casse-Briques Haute Tension</div>
+  <p>Détruis les formations de briques quantiques, ramasse les capsules de surcharge et déchaîne le multibilles ou les canons laser&nbsp;!</p>
+
+  <div class="legend">
+    <span class="chip">⚡ <b>Multi-billes</b></span>
+    <span class="chip">🚀 <b>Canons Laser</b></span>
+    <span class="chip">↔️ <b>Paddle Large</b></span>
+    <span class="chip">🔥 <b>Bille de Feu</b></span>
+    <span class="chip">🛡️ <b>Bouclier Bas</b></span>
+    <span class="chip">💣 <b>Brique Explosive</b></span>
+  </div>
+
+  <div class="legend" style="margin-top:2px;">
+    <span class="chip"><kbd>←</kbd><kbd>→</kbd> ou <kbd>Souris/Doigt</kbd> Déplacer</span>
+    <span class="chip"><kbd>Espace</kbd> ou <kbd>Clic/Tap</kbd> Lancer / Tirer</span>
+    <span class="chip"><kbd>P</kbd> Pause</span>
+    <span class="chip"><kbd>M</kbd> Son</span>
+    <span class="chip"><kbd>I</kbd> Accueil</span>
+  </div>
+
+  <div class="btn-group">
+    <button id="startBtn" class="primary-btn">▶ Commencer la partie</button>
+    <a href="/" class="secondary-btn">🏠 Index</a>
+  </div>
+</div>
+
+<!-- Écran Game Over -->
+<div id="overOverlay" class="overlay over hidden">
+  <h1>GAME OVER</h1>
+  <div class="sub">Toutes les billes ont été perdues</div>
+  <div class="scoreLine" id="overScore">Score : 0</div>
+  <div class="newRecord" id="overRecordMsg"></div>
+  <div class="btn-group">
+    <button id="retryBtn" class="primary-btn">↻ Réessayer</button>
+    <a href="/" class="secondary-btn">🏠 Index</a>
+  </div>
+</div>
+
+<!-- Écran Victoire -->
+<div id="winOverlay" class="overlay win hidden">
+  <h1>VICTOIRE !</h1>
+  <div class="sub">Tous les secteurs ont été nettoyés !</div>
+  <div class="scoreLine" id="winScore">Score final : 0</div>
+  <div class="newRecord" id="winRecordMsg"></div>
+  <div class="btn-group">
+    <button id="restartBtn" class="primary-btn">⚡ Rejouer en boucle prestige</button>
+    <a href="/" class="secondary-btn">🏠 Index</a>
+  </div>
+</div>
+
+<script>
+'use strict';
+(function(){
+  // Références DOM
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const recordEl = document.getElementById('record');
+  const levelEl = document.getElementById('level');
+  const livesEl = document.getElementById('livesVal');
+  const comboWrap = document.getElementById('comboWrap');
+  const comboVal = document.getElementById('comboVal');
+  const pauseTag = document.getElementById('pauseTag');
+  const muteBtn = document.getElementById('muteBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const menuOverlay = document.getElementById('menuOverlay');
+  const overOverlay = document.getElementById('overOverlay');
+  const winOverlay = document.getElementById('winOverlay');
+  const startBtn = document.getElementById('startBtn');
+  const retryBtn = document.getElementById('retryBtn');
+  const restartBtn = document.getElementById('restartBtn');
+  const overScoreEl = document.getElementById('overScore');
+  const winScoreEl = document.getElementById('winScore');
+  const overRecordMsg = document.getElementById('overRecordMsg');
+  const winRecordMsg = document.getElementById('winRecordMsg');
+
+  // ---------- Dimensions logiques du terrain ----------
+  const W = 600;
+  const H = 840;
+  const TOP_PLAY_Y = 60; // Sous le HUD
+  const BOTTOM_PLAY_Y = H - 24;
+
+  let dpr = 1, cssW = 0, cssH = 0, sc = 1, ox = 0, oy = 0;
+  function resize(){
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    cssW = window.innerWidth;
+    cssH = window.innerHeight;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    // Obligatoire pour éviter les débordements sur mobile / écrans haute densité
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+
+    sc = Math.min(cssW / W, cssH / H);
+    ox = (cssW - W * sc) / 2;
+    oy = (cssH - H * sc) / 2;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- Audio WebAudio de Synthèse ----------
+  let AC = null, masterGain = null;
+  let isMuted = false;
+
+  function initAudio(){
+    if (AC) return;
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      masterGain = AC.createGain();
+      masterGain.gain.value = 0.35;
+      masterGain.connect(AC.destination);
+    } catch(e) {}
+  }
+
+  function unlockAudio(){
+    initAudio();
+    if (AC && AC.state === 'suspended') {
+      AC.resume();
+    }
+  }
+
+  function toggleMute(){
+    unlockAudio();
+    isMuted = !isMuted;
+    muteBtn.textContent = isMuted ? '🔇' : '🔊';
+    if (masterGain) {
+      masterGain.gain.setValueAtTime(isMuted ? 0 : 0.35, AC ? AC.currentTime : 0);
+    }
+  }
+  muteBtn.addEventListener('click', toggleMute);
+
+  function playSound(type, param){
+    if (isMuted || !AC) return;
+    const t = AC.currentTime;
+
+    if (type === 'paddle') {
+      // Bip cristallin modulé selon l'impact
+      const osc = AC.createOscillator();
+      const gain = AC.createGain();
+      osc.type = 'sine';
+      const f0 = 340 + (param || 0) * 160;
+      osc.frequency.setValueAtTime(f0, t);
+      osc.frequency.exponentialRampToValueAtTime(f0 * 1.5, t + 0.08);
+      gain.gain.setValueAtTime(0.28, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start(t);
+      osc.stop(t + 0.09);
+    }
+    else if (type === 'wall') {
+      const osc = AC.createOscillator();
+      const gain = AC.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(220, t);
+      gain.gain.setValueAtTime(0.12, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start(t);
+      osc.stop(t + 0.05);
+    }
+    else if (type === 'brick') {
+      // Arpège montant en fonction du multiplicateur de combo
+      const osc = AC.createOscillator();
+      const gain = AC.createGain();
+      osc.type = 'sine';
+      const comboValNum = Math.min(12, param || 1);
+      const baseFreq = 440 * Math.pow(1.06, comboValNum * 1.5);
+      osc.frequency.setValueAtTime(baseFreq, t);
+      osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.25, t + 0.09);
+      gain.gain.setValueAtTime(0.25, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start(t);
+      osc.stop(t + 0.1);
+    }
+    else if (type === 'metal') {
+      const osc = AC.createOscillator();
+      const gain = AC.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(180, t);
+      osc.frequency.exponentialRampToValueAtTime(110, t + 0.08);
+      gain.gain.setValueAtTime(0.12, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start(t);
+      osc.stop(t + 0.08);
+    }
+    else if (type === 'explode') {
+      // Explosion filtrée
+      const dur = 0.35;
+      const len = Math.floor(AC.sampleRate * dur);
+      const buf = AC.createBuffer(1, len, AC.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      }
+      const noise = AC.createBufferSource();
+      noise.buffer = buf;
+      const filter = AC.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(600, t);
+      filter.frequency.exponentialRampToValueAtTime(90, t + dur);
+      const gain = AC.createGain();
+      gain.gain.setValueAtTime(0.4, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+      noise.start(t);
+    }
+    else if (type === 'powerup') {
+      // Jingle carillon montant
+      const notes = [523.25, 659.25, 783.99, 1046.50];
+      notes.forEach((freq, i) => {
+        const osc = AC.createOscillator();
+        const gain = AC.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, t + i * 0.05);
+        gain.gain.setValueAtTime(0.18, t + i * 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.05 + 0.12);
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(t + i * 0.05);
+        osc.stop(t + i * 0.05 + 0.12);
+      });
+    }
+    else if (type === 'laser') {
+      const osc = AC.createOscillator();
+      const gain = AC.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(950, t);
+      osc.frequency.exponentialRampToValueAtTime(200, t + 0.1);
+      gain.gain.setValueAtTime(0.15, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start(t);
+      osc.stop(t + 0.11);
+    }
+    else if (type === 'lost') {
+      const osc = AC.createOscillator();
+      const gain = AC.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(280, t);
+      osc.frequency.exponentialRampToValueAtTime(60, t + 0.35);
+      gain.gain.setValueAtTime(0.3, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start(t);
+      osc.stop(t + 0.36);
+    }
+    else if (type === 'win') {
+      const notes = [440, 554.37, 659.25, 880];
+      notes.forEach((freq, i) => {
+        const osc = AC.createOscillator();
+        const gain = AC.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, t + i * 0.1);
+        gain.gain.setValueAtTime(0.25, t + i * 0.1);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.1 + 0.25);
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(t + i * 0.1);
+        osc.stop(t + i * 0.1 + 0.25);
+      });
+    }
+  }
+
+  // ---------- Niveaux de Jeu ----------
+  // Codes : 0 = vide, 1-4 = briques simples (couleurs), R2 = renforcée 2 coups, R3 = blindée 3 coups,
+  // E = explosive, M = métal/indestructible
+  const LEVELS = [
+    // Niveau 1 : Initiation Néon (classique et dynamique)
+    {
+      name: "Initiation Néon",
+      rows: [
+        "1111111111",
+        "2222222222",
+        "3333333333",
+        "4444444444",
+        "0123443210"
+      ]
+    },
+    // Niveau 2 : L'Envahisseur Cybernétique
+    {
+      name: "L'Envahisseur",
+      rows: [
+        "0010000100",
+        "0001001000",
+        "0011111100",
+        "011R211R2110",
+        "1111111111",
+        "1011111101",
+        "1010000101",
+        "000E00E000"
+      ]
+    },
+    // Niveau 3 : La Forteresse et ses Bombes
+    {
+      name: "La Forteresse",
+      rows: [
+        "MMMMMMMMMM",
+        "M111EE111M",
+        "MR221111R2M",
+        "M11R3R311M",
+        "MR221111R2M",
+        "M111EE111M",
+        "0000000000"
+      ]
+    },
+    // Niveau 4 : Le Diamant d'Énergie
+    {
+      name: "Le Diamant",
+      rows: [
+        "0000330000",
+        "0003R2R23000",
+        "003R2EER2300",
+        "03R2E11ER230",
+        "3R2E1MME1R23",
+        "03R2E11ER230",
+        "003R2EER2300",
+        "0003R2R23000",
+        "0000330000"
+      ]
+    },
+    // Niveau 5 : Cœur Quantique
+    {
+      name: "Cœur Quantique",
+      rows: [
+        "R3R3R3MMR3R3R3",
+        "R2E1R2R21ER2",
+        "111E11E111",
+        "22R3M2M2R322",
+        "3311E11133",
+        "44R24444R244",
+        "00EE00EE00"
+      ]
+    }
+  ];
+
+  // Couleurs des types de briques
+  const BRICK_THEMES = {
+    '1': { fill: '#00f0ff', glow: '#00c8e0', points: 100, hp: 1 },
+    '2': { fill: '#00ff88', glow: '#00d068', points: 120, hp: 1 },
+    '3': { fill: '#ffdd00', glow: '#cca800', points: 150, hp: 1 },
+    '4': { fill: '#ff00aa', glow: '#cc0088', points: 180, hp: 1 },
+    'R2': { fill: '#ff8800', glow: '#d96600', points: 220, hp: 2 },
+    'R3': { fill: '#b844ff', glow: '#911be8', points: 300, hp: 3 },
+    'E': { fill: '#ff2244', glow: '#ff0022', points: 250, hp: 1, explosive: true },
+    'M': { fill: '#8fa0bc', glow: '#5a6e8c', points: 0, hp: Infinity, metal: true }
+  };
+
+  // Types de bonus
+  const POWERUP_TYPES = [
+    { id: 'multiball', icon: '⚡', color: '#00f0ff', name: 'Multi-billes' },
+    { id: 'laser',     icon: '🚀', color: '#ff2255', name: 'Canons Laser' },
+    { id: 'expand',    icon: '↔️', color: '#00ff88', name: 'Paddle Large' },
+    { id: 'fireball',  icon: '🔥', color: '#ff8800', name: 'Bille de Feu' },
+    { id: 'shield',    icon: '🛡️', color: '#3388ff', name: 'Bouclier Bas' },
+    { id: 'slow',      icon: '🐌', color: '#b844ff', name: 'Ralentissement' },
+    { id: 'life',      icon: '❤️', color: '#ff3388', name: '+1 Vie' }
+  ];
+
+  // ---------- Variables d'état du jeu ----------
+  let state = 'menu'; // menu | play | paused | over | win
+  let score = 0;
+  let highScore = 0;
+  try { highScore = +localStorage.getItem('cassebriques.record') || 0; } catch(e){}
+  recordEl.textContent = highScore;
+
+  let lives = 3;
+  let currentLevelIdx = 0;
+  let prestigeLoop = 0;
+  let combo = 0;
+  let screenShake = 0;
+
+  // Raquette
+  const paddle = {
+    x: W / 2,
+    y: H - 55,
+    w: 104,
+    h: 16,
+    baseW: 104,
+    vx: 0,
+    speed: 550,
+    expandTimer: 0,
+    laserTimer: 0,
+    laserShootTimer: 0
+  };
+
+  // Billes, Briques, Bonus, Lasers, Particules, Textes flottants
+  let balls = [];
+  let bricks = [];
+  let powerups = [];
+  let lasers = [];
+  let particles = [];
+  let floaters = [];
+  let shieldActive = false;
+  let fireballTimer = 0;
+  let slowTimer = 0;
+
+  // Contrôles
+  const keys = { left: false, right: false, fire: false };
+  let pointerTargetX = null;
+  let lastTime = 0;
+
+  // Étoiles de fond
+  const stars = [];
+  for (let i = 0; i < 70; i++) {
+    stars.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: Math.random() * 1.5 + 0.5,
+      alpha: Math.random() * 0.7 + 0.2,
+      speed: Math.random() * 20 + 10
+    });
+  }
+
+  // ---------- Initialisation des niveaux ----------
+  function loadLevel(idx){
+    currentLevelIdx = idx;
+    const lvl = LEVELS[idx % LEVELS.length];
+    levelEl.textContent = `${idx + 1} / ${LEVELS.length}` + (prestigeLoop > 0 ? ` (+${prestigeLoop})` : '');
+    bricks = [];
+
+    const padX = 30;
+    const availW = W - padX * 2;
+    const maxCols = 10;
+    const bw = availW / maxCols;
+    const bh = 22;
+    const startY = TOP_PLAY_Y + 40;
+
+    for (let r = 0; r < lvl.rows.length; r++) {
+      const rowStr = lvl.rows[r];
+      let c = 0;
+      let i = 0;
+      while (i < rowStr.length && c < maxCols) {
+        let code = rowStr[i];
+        if (code === 'R') {
+          code = rowStr.substring(i, i + 2);
+          i += 2;
+        } else {
+          i++;
+        }
+        if (code !== '0' && BRICK_THEMES[code]) {
+          const info = BRICK_THEMES[code];
+          bricks.push({
+            x: padX + c * bw + 2,
+            y: startY + r * (bh + 4),
+            w: bw - 4,
+            h: bh,
+            type: code,
+            hp: info.hp,
+            maxHp: info.hp,
+            points: info.points,
+            color: info.fill,
+            glow: info.glow,
+            metal: !!info.metal,
+            explosive: !!info.explosive
+          });
+        }
+        c++;
+      }
+    }
+
+    // Réinitialiser la raquette et les billes
+    resetPaddleAndBall();
+    powerups = [];
+    lasers = [];
+    shieldActive = false;
+    fireballTimer = 0;
+    slowTimer = 0;
+    combo = 0;
+    updateHud();
+  }
+
+  function resetPaddleAndBall(){
+    paddle.x = W / 2;
+    paddle.w = paddle.baseW;
+    paddle.expandTimer = 0;
+    paddle.laserTimer = 0;
+
+    // 1 bille collée à la raquette
+    balls = [{
+      x: paddle.x,
+      y: paddle.y - 12,
+      r: 7,
+      vx: 0,
+      vy: 0,
+      stuck: true,
+      trail: []
+    }];
+  }
+
+  function launchBall(b){
+    if (!b.stuck) return;
+    b.stuck = false;
+    const speed = (380 + (currentLevelIdx + prestigeLoop * 5) * 16) * (slowTimer > 0 ? 0.72 : 1);
+    // Légère inclinaison aléatoire ou selon déplacement du paddle
+    const angle = (Math.random() * 0.4 - 0.2) + (paddle.vx !== 0 ? (paddle.vx > 0 ? 0.25 : -0.25) : 0);
+    b.vx = speed * Math.sin(angle);
+    b.vy = -speed * Math.cos(angle);
+    playSound('paddle', 0);
+  }
+
+  function updateHud(){
+    scoreEl.textContent = score;
+    let hearts = '';
+    for (let i = 0; i < Math.min(lives, 5); i++) hearts += '❤️';
+    if (lives > 5) hearts += `+${lives - 5}`;
+    livesEl.textContent = hearts || '0';
+
+    if (combo > 1) {
+      comboWrap.style.display = 'flex';
+      comboVal.textContent = `x${combo}`;
+    } else {
+      comboWrap.style.display = 'none';
+    }
+  }
+
+  function addScore(pts, x, y, isComboBonus){
+    const total = pts * (combo > 1 ? combo : 1);
+    score += total;
+    if (score > highScore) {
+      highScore = score;
+      recordEl.textContent = highScore;
+      try { localStorage.setItem('cassebriques.record', highScore); } catch(e){}
+    }
+    updateHud();
+
+    if (x !== undefined && y !== undefined) {
+      floaters.push({
+        text: `+${total}` + (combo > 1 ? ` (x${combo})` : ''),
+        x: x,
+        y: y,
+        vy: -40,
+        alpha: 1,
+        color: isComboBonus ? '#ffea00' : '#00f0ff'
+      });
+    }
+  }
+
+  // ---------- Destructions & Particules ----------
+  function spawnParticles(x, y, color, count, speedMult){
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = (Math.random() * 120 + 40) * (speedMult || 1);
+      particles.push({
+        x: x,
+        y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        r: Math.random() * 2.5 + 1.2,
+        color: color,
+        alpha: 1,
+        life: Math.random() * 0.4 + 0.3
+      });
+    }
+  }
+
+  function hitBrick(brick, hitBall){
+    if (brick.metal) {
+      if (fireballTimer > 0) {
+        // La boule de feu peut briser le métal !
+        destroyBrick(brick, true);
+      } else {
+        playSound('metal');
+        spawnParticles(brick.x + brick.w / 2, brick.y + brick.h / 2, '#ffffff', 4, 0.5);
+      }
+      return;
+    }
+
+    if (fireballTimer > 0) {
+      destroyBrick(brick);
+      return;
+    }
+
+    brick.hp--;
+    if (brick.hp <= 0) {
+      destroyBrick(brick);
+    } else {
+      combo++;
+      addScore(50, brick.x + brick.w / 2, brick.y + brick.h / 2);
+      playSound('brick', combo);
+      spawnParticles(brick.x + brick.w / 2, brick.y + brick.h / 2, brick.color, 6, 0.7);
+    }
+  }
+
+  function destroyBrick(brick, silent){
+    const idx = bricks.indexOf(brick);
+    if (idx === -1) return;
+    bricks.splice(idx, 1);
+
+    combo++;
+    addScore(brick.points || 100, brick.x + brick.w / 2, brick.y + brick.h / 2, combo > 2);
+    if (!silent) playSound('brick', combo);
+    spawnParticles(brick.x + brick.w / 2, brick.y + brick.h / 2, brick.color, 14, 1.2);
+
+    // Brique explosive : réaction en chaîne
+    if (brick.explosive) {
+      triggerExplosion(brick.x + brick.w / 2, brick.y + brick.h / 2);
+    }
+
+    // Chance de bonus (25%)
+    if (!brick.metal && Math.random() < 0.26) {
+      spawnPowerup(brick.x + brick.w / 2, brick.y + brick.h / 2);
+    }
+
+    // Vérifier si toutes les briques destructibles sont éliminées
+    checkLevelClear();
+  }
+
+  function triggerExplosion(ex, ey){
+    playSound('explode');
+    screenShake = Math.max(screenShake, 10);
+    spawnParticles(ex, ey, '#ff3344', 28, 2.2);
+    spawnParticles(ex, ey, '#ffea00', 16, 1.5);
+
+    // Onde de choc circulaire
+    particles.push({
+      x: ex,
+      y: ey,
+      isShockwave: true,
+      r: 10,
+      maxR: 90,
+      alpha: 1,
+      color: '#ff2255'
+    });
+
+    // Détruire les briques dans un rayon de 95px
+    const radius = 95;
+    for (let i = bricks.length - 1; i >= 0; i--) {
+      const b = bricks[i];
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      const d = Math.hypot(cx - ex, cy - ey);
+      if (d < radius && !b.metal) {
+        destroyBrick(b, true);
+      }
+    }
+  }
+
+  function spawnPowerup(x, y){
+    // Choisir un type (le cœur de vie est plus rare)
+    let pType;
+    if (Math.random() < 0.06 && lives < 5) {
+      pType = POWERUP_TYPES.find(p => p.id === 'life');
+    } else {
+      const pool = POWERUP_TYPES.filter(p => p.id !== 'life');
+      pType = pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    powerups.push({
+      x: x,
+      y: y,
+      vy: 135,
+      w: 32,
+      h: 20,
+      type: pType
+    });
+  }
+
+  function applyPowerup(p){
+    playSound('powerup');
+    addScore(150, p.x, p.y);
+    floaters.push({
+      text: p.type.name,
+      x: p.x,
+      y: p.y - 10,
+      vy: -50,
+      alpha: 1,
+      color: p.type.color
+    });
+
+    switch (p.type.id) {
+      case 'multiball':
+        // Dédoubler ou tripler les billes en jeu
+        const currentBalls = [...balls];
+        currentBalls.forEach(b => {
+          if (b.stuck) launchBall(b);
+          for (let i = 0; i < 2; i++) {
+            const angleOffset = (i === 0 ? 0.35 : -0.35);
+            const speed = Math.hypot(b.vx, b.vy) || 400;
+            const curAngle = Math.atan2(b.vy, b.vx);
+            balls.push({
+              x: b.x,
+              y: b.y,
+              r: b.r,
+              vx: speed * Math.cos(curAngle + angleOffset),
+              vy: speed * Math.sin(curAngle + angleOffset),
+              stuck: false,
+              trail: []
+            });
+          }
+        });
+        break;
+
+      case 'laser':
+        paddle.laserTimer = 10; // 10 secondes de canons laser
+        break;
+
+      case 'expand':
+        paddle.w = paddle.baseW * 1.45;
+        paddle.expandTimer = 12; // 12 secondes
+        break;
+
+      case 'fireball':
+        fireballTimer = 8; // 8 secondes de boule de feu
+        break;
+
+      case 'shield':
+        shieldActive = true;
+        break;
+
+      case 'slow':
+        slowTimer = 10;
+        balls.forEach(b => {
+          if (!b.stuck) {
+            b.vx *= 0.75;
+            b.vy *= 0.75;
+          }
+        });
+        break;
+
+      case 'life':
+        lives++;
+        updateHud();
+        break;
+    }
+  }
+
+  function checkLevelClear(){
+    const remaining = bricks.filter(b => !b.metal).length;
+    if (remaining === 0) {
+      playSound('win');
+      if (currentLevelIdx + 1 < LEVELS.length) {
+        loadLevel(currentLevelIdx + 1);
+      } else {
+        // Tous les niveaux terminés -> Victoire ou boucle prestige
+        winOverlay.classList.remove('hidden');
+        state = 'win';
+        winScoreEl.textContent = `Score final : ${score}`;
+        if (score >= highScore) {
+          winRecordMsg.textContent = '★ NOUVEAU RECORD ÉTABLI ! ★';
+        } else {
+          winRecordMsg.textContent = `Record actuel : ${highScore}`;
+        }
+      }
+    }
+  }
+
+  function shootLasers(){
+    if (paddle.laserTimer <= 0) return;
+    playSound('laser');
+    lasers.push({ x: paddle.x - paddle.w / 2 + 10, y: paddle.y - 4, vy: -750 });
+    lasers.push({ x: paddle.x + paddle.w / 2 - 10, y: paddle.y - 4, vy: -750 });
+  }
+
+  // ---------- Boucle Principale & Physique ----------
+  function update(dt){
+    // Étoiles de fond
+    for (const s of stars) {
+      s.y += s.speed * dt;
+      if (s.y > H) {
+        s.y = 0;
+        s.x = Math.random() * W;
+      }
+    }
+
+    if (screenShake > 0) {
+      screenShake = Math.max(0, screenShake - dt * 25);
+    }
+
+    if (state !== 'play') return;
+
+    // Minuteurs d'effets
+    if (paddle.expandTimer > 0) {
+      paddle.expandTimer -= dt;
+      if (paddle.expandTimer <= 0) paddle.w = paddle.baseW;
+    }
+    if (paddle.laserTimer > 0) {
+      paddle.laserTimer -= dt;
+      paddle.laserShootTimer += dt;
+      if (paddle.laserShootTimer >= 0.35) {
+        paddle.laserShootTimer = 0;
+        shootLasers();
+      }
+    }
+    if (fireballTimer > 0) fireballTimer -= dt;
+    if (slowTimer > 0) slowTimer -= dt;
+
+    // Déplacement de la raquette
+    paddle.vx = 0;
+    if (pointerTargetX !== null) {
+      // Déplacement direct à la souris / tactile avec interpolation souple
+      const diff = pointerTargetX - paddle.x;
+      paddle.x += diff * Math.min(1, dt * 24);
+      paddle.vx = diff * 12;
+    } else {
+      if (keys.left) {
+        paddle.vx = -paddle.speed;
+        paddle.x += paddle.vx * dt;
+      }
+      if (keys.right) {
+        paddle.vx = paddle.speed;
+        paddle.x += paddle.vx * dt;
+      }
+    }
+
+    // Limites de la raquette
+    const halfW = paddle.w / 2;
+    if (paddle.x - halfW < 12) {
+      paddle.x = 12 + halfW;
+    }
+    if (paddle.x + halfW > W - 12) {
+      paddle.x = W - 12 - halfW;
+    }
+
+    // Tir manuel si touche Espace ou tir
+    if (keys.fire) {
+      balls.forEach(b => {
+        if (b.stuck) launchBall(b);
+      });
+      if (paddle.laserTimer > 0 && paddle.laserShootTimer >= 0.2) {
+        paddle.laserShootTimer = 0;
+        shootLasers();
+      }
+    }
+
+    // Gestion des Lasers
+    for (let i = lasers.length - 1; i >= 0; i--) {
+      const l = lasers[i];
+      l.y += l.vy * dt;
+      if (l.y < TOP_PLAY_Y) {
+        lasers.splice(i, 1);
+        continue;
+      }
+      // Collision laser avec les briques
+      for (let j = bricks.length - 1; j >= 0; j--) {
+        const b = bricks[j];
+        if (l.x >= b.x && l.x <= b.x + b.w && l.y >= b.y && l.y <= b.y + b.h) {
+          hitBrick(b, null);
+          lasers.splice(i, 1);
+          break;
+        }
+      }
+    }
+
+    // Gestion des capsules de bonus
+    for (let i = powerups.length - 1; i >= 0; i--) {
+      const p = powerups[i];
+      p.y += p.vy * dt;
+
+      // Contact avec la raquette
+      if (p.y + p.h / 2 >= paddle.y - paddle.h / 2 &&
+          p.y - p.h / 2 <= paddle.y + paddle.h / 2 &&
+          p.x >= paddle.x - paddle.w / 2 - 10 &&
+          p.x <= paddle.x + paddle.w / 2 + 10) {
+        applyPowerup(p);
+        powerups.splice(i, 1);
+        continue;
+      }
+
+      // Perdu en bas
+      if (p.y > H + 20) {
+        powerups.splice(i, 1);
+      }
+    }
+
+    // Gestion des billes
+    for (let i = balls.length - 1; i >= 0; i--) {
+      const b = balls[i];
+
+      if (b.stuck) {
+        b.x = paddle.x;
+        b.y = paddle.y - paddle.h / 2 - b.r;
+        continue;
+      }
+
+      // Enregistrement de la traînée
+      b.trail.unshift({ x: b.x, y: b.y });
+      if (b.trail.length > 7) b.trail.pop();
+
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+
+      // Rebond murs gauche / droite
+      if (b.x - b.r < 12) {
+        b.x = 12 + b.r;
+        b.vx = Math.abs(b.vx);
+        playSound('wall');
+      } else if (b.x + b.r > W - 12) {
+        b.x = W - 12 - b.r;
+        b.vx = -Math.abs(b.vx);
+        playSound('wall');
+      }
+
+      // Rebond plafond
+      if (b.y - b.r < TOP_PLAY_Y) {
+        b.y = TOP_PLAY_Y + b.r;
+        b.vy = Math.abs(b.vy);
+        playSound('wall');
+      }
+
+      // Bouclier d'énergie en bas
+      if (shieldActive && b.y + b.r >= BOTTOM_PLAY_Y) {
+        b.y = BOTTOM_PLAY_Y - b.r;
+        b.vy = -Math.abs(b.vy);
+        shieldActive = false; // Consommé
+        playSound('paddle', 0);
+        screenShake = 6;
+        floaters.push({ text: 'BOUCLIER CONOMMÉ !', x: W / 2, y: H - 40, vy: -30, alpha: 1, color: '#3388ff' });
+      }
+
+      // Rebond sur la raquette
+      if (b.vy > 0 &&
+          b.y + b.r >= paddle.y - paddle.h / 2 &&
+          b.y - b.r <= paddle.y + paddle.h / 2 &&
+          b.x >= paddle.x - paddle.w / 2 - 4 &&
+          b.x <= paddle.x + paddle.w / 2 + 4) {
+
+        combo = 0; // Réinitialise le multiplicateur de combo
+        updateHud();
+
+        // Calcul d'angle précis selon le point d'impact
+        const rel = (b.x - paddle.x) / (paddle.w / 2);
+        const clampedRel = Math.max(-0.92, Math.min(0.92, rel));
+        const maxAngle = Math.PI * 0.38; // Jusqu'à ~68 degrés
+        const angle = clampedRel * maxAngle;
+        const curSpeed = Math.hypot(b.vx, b.vy);
+
+        b.vx = curSpeed * Math.sin(angle);
+        b.vy = -curSpeed * Math.cos(angle);
+        b.y = paddle.y - paddle.h / 2 - b.r;
+
+        playSound('paddle', Math.abs(clampedRel));
+        spawnParticles(b.x, b.y, '#00f0ff', 5, 0.6);
+      }
+
+      // Collisions avec les briques (Circle-Rect AABB)
+      for (let j = bricks.length - 1; j >= 0; j--) {
+        const br = bricks[j];
+
+        // Boîte englobante
+        const closestX = Math.max(br.x, Math.min(b.x, br.x + br.w));
+        const closestY = Math.max(br.y, Math.min(b.y, br.y + br.h));
+        const distX = b.x - closestX;
+        const distY = b.y - closestY;
+        const distSq = distX * distX + distY * distY;
+
+        if (distSq < b.r * b.r) {
+          hitBrick(br, b);
+
+          if (fireballTimer <= 0 || br.metal) {
+            // Rebond normal
+            const overlapX = (b.r) - Math.abs(distX);
+            const overlapY = (b.r) - Math.abs(distY);
+
+            if (overlapX < overlapY) {
+              b.vx = distX > 0 ? Math.abs(b.vx) : -Math.abs(b.vx);
+            } else {
+              b.vy = distY > 0 ? Math.abs(b.vy) : -Math.abs(b.vy);
+            }
+          }
+          break; // Un seul rebond par étape
+        }
+      }
+
+      // Bille perdue en bas
+      if (b.y - b.r > H) {
+        balls.splice(i, 1);
+      }
+    }
+
+    // Si toutes les billes sont tombées
+    if (balls.length === 0) {
+      lives--;
+      updateHud();
+      playSound('lost');
+      if (lives > 0) {
+        resetPaddleAndBall();
+      } else {
+        // Game Over
+        state = 'over';
+        overOverlay.classList.remove('hidden');
+        overScoreEl.textContent = `Score final : ${score}`;
+        if (score >= highScore && score > 0) {
+          overRecordMsg.textContent = '★ NOUVEAU RECORD ÉTABLI ! ★';
+        } else {
+          overRecordMsg.textContent = `Record actuel : ${highScore}`;
+        }
+      }
+    }
+
+    // Particules
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      if (p.isShockwave) {
+        p.r += (p.maxR - p.r) * dt * 9;
+        p.alpha -= dt * 2.2;
+        if (p.alpha <= 0) particles.splice(i, 1);
+        continue;
+      }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.alpha -= dt / p.life;
+      if (p.alpha <= 0) particles.splice(i, 1);
+    }
+
+    // Textes flottants
+    for (let i = floaters.length - 1; i >= 0; i--) {
+      const f = floaters[i];
+      f.y += f.vy * dt;
+      f.alpha -= dt * 1.2;
+      if (f.alpha <= 0) floaters.splice(i, 1);
+    }
+  }
+
+  // ---------- Rendu Canvas ----------
+  function draw(){
+    ctx.save();
+    // Effacer l'écran
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#040612';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Ajustement de la caméra (centrage + zoom DPR + screen shake)
+    ctx.translate(ox * dpr, oy * dpr);
+    ctx.scale(sc * dpr, sc * dpr);
+
+    if (screenShake > 0) {
+      const sx = (Math.random() * 2 - 1) * screenShake;
+      const sy = (Math.random() * 2 - 1) * screenShake;
+      ctx.translate(sx, sy);
+    }
+
+    // Cadre de jeu
+    ctx.fillStyle = '#060919';
+    ctx.fillRect(0, 0, W, H);
+
+    // Grille néon subtile
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.04)';
+    ctx.lineWidth = 1;
+    for (let x = 30; x < W; x += 40) {
+      ctx.beginPath(); ctx.moveTo(x, TOP_PLAY_Y); ctx.lineTo(x, H); ctx.stroke();
+    }
+    for (let y = TOP_PLAY_Y; y < H; y += 40) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+
+    // Étoiles de fond
+    for (const s of stars) {
+      ctx.fillStyle = `rgba(180, 220, 255, ${s.alpha})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Murs latéraux lumineux
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.4)';
+    ctx.shadowColor = '#00e5ff';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.moveTo(10, H);
+    ctx.lineTo(10, TOP_PLAY_Y);
+    ctx.lineTo(W - 10, TOP_PLAY_Y);
+    ctx.lineTo(W - 10, H);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Bouclier bas s'il est actif
+    if (shieldActive) {
+      ctx.save();
+      ctx.strokeStyle = '#3399ff';
+      ctx.shadowColor = '#3399ff';
+      ctx.shadowBlur = 14;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(12, BOTTOM_PLAY_Y);
+      ctx.lineTo(W - 12, BOTTOM_PLAY_Y);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Dessiner les briques
+    for (const br of bricks) {
+      ctx.save();
+      ctx.shadowColor = br.glow;
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = br.color;
+
+      // Coins arrondis
+      const rx = 4;
+      ctx.beginPath();
+      ctx.roundRect(br.x, br.y, br.w, br.h, rx);
+      ctx.fill();
+
+      // Reflet interne
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+      ctx.fillRect(br.x + 2, br.y + 2, br.w - 4, br.h * 0.35);
+
+      // Fissures si brique endommagée
+      if (br.maxHp > 1 && br.hp < br.maxHp) {
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(br.x + br.w * 0.3, br.y + 3);
+        ctx.lineTo(br.x + br.w * 0.5, br.y + br.h * 0.6);
+        ctx.lineTo(br.x + br.w * 0.7, br.y + br.h - 3);
+        ctx.stroke();
+      }
+
+      // Motif brique explosive
+      if (br.explosive) {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('💣', br.x + br.w / 2, br.y + br.h / 2 + 1);
+      }
+
+      // Motif brique métal
+      if (br.metal) {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('⚡', br.x + br.w / 2, br.y + br.h / 2);
+      }
+
+      ctx.restore();
+    }
+
+    // Dessiner les capsules de bonus
+    for (const p of powerups) {
+      ctx.save();
+      ctx.shadowColor = p.type.color;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = 'rgba(15, 25, 45, 0.9)';
+      ctx.strokeStyle = p.type.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(p.x - p.w / 2, p.y - p.h / 2, p.w, p.h, 10);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(p.type.icon, p.x, p.y);
+      ctx.restore();
+    }
+
+    // Dessiner les lasers
+    for (const l of lasers) {
+      ctx.save();
+      ctx.shadowColor = '#ff2255';
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = '#ff3366';
+      ctx.fillRect(l.x - 2, l.y - 10, 4, 14);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(l.x - 1, l.y - 8, 2, 10);
+      ctx.restore();
+    }
+
+    // Dessiner la Raquette (Paddle)
+    ctx.save();
+    const isLaserActive = paddle.laserTimer > 0;
+    const paddleColor = isLaserActive ? '#ff2266' : (paddle.expandTimer > 0 ? '#00ff88' : '#00e5ff');
+    ctx.shadowColor = paddleColor;
+    ctx.shadowBlur = 14;
+
+    // Corps principal
+    const grad = ctx.createLinearGradient(paddle.x - paddle.w / 2, 0, paddle.x + paddle.w / 2, 0);
+    grad.addColorStop(0, '#55c0ff');
+    grad.addColorStop(0.5, paddleColor);
+    grad.addColorStop(1, '#55c0ff');
+    ctx.fillStyle = grad;
+
+    ctx.beginPath();
+    ctx.roundRect(paddle.x - paddle.w / 2, paddle.y - paddle.h / 2, paddle.w, paddle.h, 8);
+    ctx.fill();
+
+    // Reflet blanc au sommet
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.fillRect(paddle.x - paddle.w / 2 + 6, paddle.y - paddle.h / 2 + 2, paddle.w - 12, 3);
+
+    // Canons laser si actifs
+    if (isLaserActive) {
+      ctx.fillStyle = '#ff2255';
+      ctx.fillRect(paddle.x - paddle.w / 2 + 6, paddle.y - paddle.h / 2 - 6, 6, 6);
+      ctx.fillRect(paddle.x + paddle.w / 2 - 12, paddle.y - paddle.h / 2 - 6, 6, 6);
+    }
+    ctx.restore();
+
+    // Dessiner les billes et leurs traînées
+    for (const b of balls) {
+      const isFire = fireballTimer > 0;
+      const bColor = isFire ? '#ff7700' : '#00f0ff';
+      const bCore = isFire ? '#ffdd00' : '#ffffff';
+
+      // Traînée
+      for (let i = 0; i < b.trail.length; i++) {
+        const pt = b.trail[i];
+        const alpha = (1 - (i + 1) / (b.trail.length + 1)) * 0.45;
+        ctx.fillStyle = isFire ? `rgba(255, 120, 0, ${alpha})` : `rgba(0, 240, 255, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, b.r * (1 - i * 0.08), 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Bille principale
+      ctx.save();
+      ctx.shadowColor = bColor;
+      ctx.shadowBlur = isFire ? 18 : 12;
+      ctx.fillStyle = bColor;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Cœur brillant
+      ctx.fillStyle = bCore;
+      ctx.beginPath();
+      ctx.arc(b.x - 1.5, b.y - 1.5, b.r * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Dessiner les particules
+    for (const p of particles) {
+      ctx.save();
+      if (p.isShockwave) {
+        ctx.strokeStyle = p.color;
+        ctx.globalAlpha = Math.max(0, p.alpha);
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.max(0, p.alpha);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Dessiner les textes flottants
+    for (const f of floaters) {
+      ctx.save();
+      ctx.fillStyle = f.color;
+      ctx.shadowColor = f.color;
+      ctx.shadowBlur = 8;
+      ctx.globalAlpha = Math.max(0, f.alpha);
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(f.text, f.x, f.y);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  // ---------- Boucle d'Animation ----------
+  function loop(timestamp){
+    if (!lastTime) lastTime = timestamp;
+    let dt = (timestamp - lastTime) / 1000;
+    if (dt > 0.05) dt = 0.05; // Plafond en cas de lag ou changement d'onglet
+    lastTime = timestamp;
+
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // ---------- Gestion des Contrôles & Événements ----------
+  function togglePause(){
+    if (state !== 'play' && state !== 'paused') return;
+    if (state === 'play') {
+      state = 'paused';
+      pauseTag.classList.add('on');
+    } else {
+      state = 'play';
+      pauseTag.classList.remove('on');
+    }
+  }
+  pauseBtn.addEventListener('click', togglePause);
+
+  function startGame(){
+    unlockAudio();
+    menuOverlay.classList.add('hidden');
+    overOverlay.classList.add('hidden');
+    winOverlay.classList.add('hidden');
+    pauseTag.classList.remove('on');
+
+    score = 0;
+    lives = 3;
+    prestigeLoop = 0;
+    loadLevel(0);
+    state = 'play';
+  }
+
+  startBtn.addEventListener('click', startGame);
+  retryBtn.addEventListener('click', startGame);
+  restartBtn.addEventListener('click', () => {
+    prestigeLoop++;
+    loadLevel(0);
+    winOverlay.classList.add('hidden');
+    state = 'play';
+  });
+
+  // Clavier
+  window.addEventListener('keydown', (e) => {
+    unlockAudio();
+    if (e.key === 'ArrowLeft' || e.key === 'q' || e.key === 'Q' || e.key === 'a' || e.key === 'A') {
+      keys.left = true;
+      pointerTargetX = null; // Priorité au clavier
+    } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+      keys.right = true;
+      pointerTargetX = null;
+    } else if (e.key === ' ' || e.key === 'ArrowUp') {
+      keys.fire = true;
+      if (state === 'menu') startGame();
+      else if (state === 'over' || state === 'win') startGame();
+    } else if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+      togglePause();
+    } else if (e.key === 'm' || e.key === 'M') {
+      toggleMute();
+    } else if (e.key === 'i' || e.key === 'I') {
+      // Raccourci vers l'index demandé par l'utilisateur
+      window.location.href = '/';
+    }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'q' || e.key === 'Q' || e.key === 'a' || e.key === 'A') {
+      keys.left = false;
+    } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+      keys.right = false;
+    } else if (e.key === ' ' || e.key === 'ArrowUp') {
+      keys.fire = false;
+    }
+  });
+
+  // Souris et Tactile sur le Canvas
+  function getLogicalX(clientX){
+    return (clientX - ox) / sc;
+  }
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (state === 'play') {
+      pointerTargetX = getLogicalX(e.clientX);
+    }
+  });
+
+  canvas.addEventListener('pointerdown', (e) => {
+    unlockAudio();
+    if (state === 'play') {
+      pointerTargetX = getLogicalX(e.clientX);
+      balls.forEach(b => {
+        if (b.stuck) launchBall(b);
+      });
+      if (paddle.laserTimer > 0) {
+        shootLasers();
+      }
+    }
+  });
+
+  // Prévenir les gestes par défaut tactiles
+  document.addEventListener('touchmove', (e) => {
+    if (e.target === canvas) e.preventDefault();
+  }, { passive: false });
+
+})();
+</script>
+</body>
+</html>
