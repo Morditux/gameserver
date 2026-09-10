@@ -1,0 +1,1138 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="description" content="Q*bert — La Pyramide Néon : saute en diagonale, change la couleur des cubes et échappe à Coily et ses acolytes."/>
+<meta name="theme-color" content="#0a0420"/>
+<title>Q*bert — La Pyramide Néon</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🟠</text></svg>"/>
+<style>
+  * { box-sizing: border-box; }
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;
+    background:#04010c;font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#eaf6ff;
+    overscroll-behavior:none;-webkit-user-select:none;user-select:none;
+    -webkit-tap-highlight-color:transparent;}
+  canvas{display:block;touch-action:none;}
+
+  /* ---------- Écrans ---------- */
+  .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:12px;background:radial-gradient(ellipse at center,rgba(30,8,70,.74),rgba(0,0,0,.95));
+    z-index:10;text-align:center;padding:22px;}
+  .overlay.hidden{display:none;}
+  .overlay h1{margin:0;font-size:clamp(34px,8vw,68px);letter-spacing:8px;color:#ffb35c;
+    text-shadow:0 0 22px #ff9b3d,0 0 60px #ff9b3d66,0 0 110px #8a5cff;}
+  .overlay.over h1{color:#ff5c8a;text-shadow:0 0 22px #ff3d7a,0 0 70px #ff2d6b;}
+  .overlay .sub{font-size:16px;color:#b89bff;letter-spacing:4px;margin:2px 0 6px;text-transform:uppercase;}
+  .overlay p{max-width:560px;line-height:1.7;color:#cdc3ef;font-size:14.5px;margin:2px 0;}
+  .overlay .scoreLine{font-size:24px;color:#ffd166;font-weight:700;letter-spacing:1px;}
+  #newHi{font-size:16px;color:#7CFF5E;font-weight:700;letter-spacing:1px;}
+  .overlay .legend{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;margin-top:4px;}
+  .overlay .chip{display:flex;align-items:center;gap:7px;background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.16);border-radius:20px;padding:5px 12px;font-size:13px;color:#dcd4ff;}
+  .overlay kbd{background:#120b30;border:1px solid #4a3f8f;border-bottom-width:3px;border-radius:6px;
+    padding:2px 8px;font-family:inherit;font-size:12px;color:#cfc4ff;}
+  .overlay button{margin-top:12px;padding:14px 42px;font-size:17px;font-weight:700;letter-spacing:1px;
+    color:#1a0d03;background:linear-gradient(180deg,#ffd79b,#ff9b3d);border:none;border-radius:12px;
+    cursor:pointer;box-shadow:0 0 24px #ff9b3d88;transition:transform .1s, box-shadow .1s;}
+  .overlay button:hover{transform:translateY(-2px);box-shadow:0 0 34px #ff9b3dcc;}
+  #pauseTag{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:6;font-size:38px;
+    font-weight:800;letter-spacing:10px;color:#fff;text-shadow:0 0 20px #000,0 0 30px #8a5cff;pointer-events:none;
+    opacity:0;transition:opacity .15s;}
+  #pauseTag.on{opacity:.9;}
+
+  /* ---------- D-pad tactile ---------- */
+  #dpad{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:5;
+    display:none;grid-template-columns:repeat(3,58px);grid-template-rows:repeat(3,58px);gap:6px;}
+  #dpad .dbtn{width:58px;height:58px;border-radius:14px;border:1px solid rgba(255,255,255,.22);
+    background:rgba(20,10,45,.62);color:#ffd79b;font-size:24px;line-height:1;cursor:pointer;
+    box-shadow:0 0 12px rgba(255,155,61,.25);touch-action:none;}
+  #dpad .dbtn:active{background:rgba(255,155,61,.28);}
+  #dpad .ul{grid-area:1/1;} #dpad .ur{grid-area:1/3;}
+  #dpad .dl{grid-area:3/1;} #dpad .dr{grid-area:3/3;}
+  @media (pointer:coarse){ #dpad{display:grid;} }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="overlay" class="overlay">
+  <h1>Q*BERT</h1>
+  <div class="sub">La Pyramide Néon</div>
+  <p>Fais changer la couleur de <b>tous les cubes</b> en sautant dessus. Évite Coily, les balles rouges, Ugg et Wrongway.
+     Attrape Slick &amp; Sam pour <b>+300</b> et utilise les disques pour remonter au sommet&nbsp;!</p>
+  <div class="legend">
+    <span class="chip"><kbd>↑</kbd> monter à gauche</span>
+    <span class="chip"><kbd>→</kbd> monter à droite</span>
+    <span class="chip"><kbd>↓</kbd> descendre à droite</span>
+    <span class="chip"><kbd>←</kbd> descendre à gauche</span>
+    <span class="chip"><kbd>P</kbd> Pause</span>
+    <span class="chip">📱 Glisser / D-pad</span>
+  </div>
+  <button id="startBtn">▶ Jouer</button>
+</div>
+
+<div id="over2" class="overlay over hidden">
+  <h1>GAME OVER</h1>
+  <div class="sub">La pyramide s'éteint…</div>
+  <div class="scoreLine" id="finalScore">0</div>
+  <div id="newHi"></div>
+  <button id="restartBtn">↻ Rejouer</button>
+</div>
+
+<div id="pauseTag">PAUSE</div>
+
+<div id="dpad" aria-hidden="true">
+  <button class="dbtn ul" data-dir="ul">↖</button>
+  <button class="dbtn ur" data-dir="ur">↗</button>
+  <button class="dbtn dl" data-dir="dl">↙</button>
+  <button class="dbtn dr" data-dir="dr">↘</button>
+</div>
+
+<script>
+'use strict';
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const over2 = document.getElementById('over2');
+  const startBtn = document.getElementById('startBtn');
+  const restartBtn = document.getElementById('restartBtn');
+  const finalScoreEl = document.getElementById('finalScore');
+  const newHiEl = document.getElementById('newHi');
+  const pauseTag = document.getElementById('pauseTag');
+
+  // ---------- Dimensions logiques (espace de jeu) ----------
+  const W = 480, H = 640;
+  const ROWS = 7;                 // nombre de rangées de la pyramide
+  const HW = 30, HH = 15;         // demi-largeur / demi-hauteur du losange supérieur
+  const SIDE = 22;                // hauteur des faces latérales
+  const ROW_STEP = 38;            // décalage vertical entre deux rangées
+  const CUBE_W = HW * 2;          // largeur d'un cube
+  const CX = W / 2;
+  const TOP_Y = 176;              // ordonnée de la face supérieure du cube sommital
+  const JUMP_DUR = 0.17;          // durée d'un saut de Q*bert
+
+  let dpr = 1, cssW = 0, cssH = 0, sc = 1, ox = 0, oy = 0;
+  function resize(){
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    cssW = window.innerWidth; cssH = window.innerHeight;
+    // Taille du tampon de dessin (net en haut DPR)…
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    // …mais l'élément est affiché à la taille du viewport (sinon le canvas
+    // déborde de l'écran sur tablette/téléphone où le DPR est > 1).
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+    sc = Math.min(cssW / W, cssH / H);
+    ox = (cssW - W * sc) / 2;
+    oy = (cssH - H * sc) / 2;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- Configuration des niveaux ----------
+  // Chaque cycle de 4 niveaux ajoute une passe ; au-delà on reprend les
+  // palettes en accélérant le rythme.
+  const LEVELS = [
+    { hits: 1, colors: ['#2f6bff', '#ffd166'] },
+    { hits: 2, colors: ['#2f6bff', '#3fe08a', '#ffd166'] },
+    { hits: 3, colors: ['#2f6bff', '#3fe08a', '#b46bff', '#ffd166'] },
+    { hits: 4, colors: ['#2f6bff', '#3fe08a', '#b46bff', '#ff6ba6', '#ffd166'] }
+  ];
+  const DIRS = { ul: [-1, -1], ur: [-1, 0], dl: [1, 0], dr: [1, 1] };
+
+  function levelCfg(){
+    const base = LEVELS[(level - 1) % LEVELS.length];
+    const cycle = Math.floor((level - 1) / LEVELS.length);
+    return {
+      hits: base.hits,
+      colors: base.colors,
+      coilyInterval: Math.max(0.32, 0.62 - cycle * 0.07),
+      ballInterval: Math.max(1.3, 3.2 - level * 0.14),
+      ballSpeed: Math.min(3.6, 1.6 + level * 0.12),
+      gremlinDelay: Math.max(5, 12 - level * 0.5),
+      uggDelay: level < 2 ? 1e9 : Math.max(7, 17 - level * 0.8)
+    };
+  }
+
+  // ---------- Géométrie de la pyramide ----------
+  function cubeX(r, c){ return CX + (c - r / 2) * CUBE_W; }
+  function cubeY(r){ return TOP_Y + r * ROW_STEP; }
+  function discPos(side){
+    return side === 'left'
+      ? { x: cubeX(6, 0) - 38, y: cubeY(6) + 22 }
+      : { x: cubeX(6, 6) + 38, y: cubeY(6) + 22 };
+  }
+
+  // ---------- État du jeu ----------
+  let state = 'menu';             // menu | play | dying | levelclear | over
+  let paused = false;
+  let score = 0, hi = 0, lives = 3, level = 1, nextExtra = 8000;
+  let cubes = [], player = null, coily = null;
+  let balls = [], gremlins = [], uggs = [], particles = [], pops = [], stars = [];
+  const discs = {
+    left:  { available: true, respawn: 0, pop: 0 },
+    right: { available: true, respawn: 0, pop: 0 }
+  };
+  const timers = { ball: 0, gremlin: 0, ugg: 0 };
+  let coilyLure = null;           // { side, t } : Coily attiré vers un disque
+  let landingCount = 0;
+  let shake = 0, flash = 0, deathT = 0, clearT = 0, time = 0;
+
+  try { hi = +localStorage.getItem('qbert.hi') || 0; } catch(e){}
+
+  // ---------- Audio (synthèse WebAudio) ----------
+  let AC = null, master = null;
+  function unlockAudio(){
+    if(AC){ if(AC.state === 'suspended') AC.resume(); return; }
+    try{
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      master = AC.createGain(); master.gain.value = 0.5; master.connect(AC.destination);
+    }catch(e){}
+  }
+  function noiseBurst(dur, vol, cutoff){
+    if(!AC) return;
+    const len = Math.max(1, Math.floor(AC.sampleRate * dur));
+    const buf = AC.createBuffer(1, len, AC.sampleRate);
+    const d = buf.getChannelData(0);
+    for(let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = AC.createBufferSource(); src.buffer = buf;
+    const f = AC.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff;
+    const g = AC.createGain(); g.gain.value = vol;
+    src.connect(f); f.connect(g); g.connect(master); src.start();
+  }
+  function sfx(name, arg){
+    if(!AC) return;
+    const t = AC.currentTime;
+    const o = (type, f0, f1, dur, vol, delay) => {
+      delay = delay || 0;
+      const osc = AC.createOscillator(), g = AC.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(Math.max(1, f0), t + delay);
+      if(f1) osc.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + delay + dur);
+      g.gain.setValueAtTime(0.0001, t + delay);
+      g.gain.exponentialRampToValueAtTime(vol, t + delay + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + delay + dur);
+      osc.connect(g); g.connect(master);
+      osc.start(t + delay); osc.stop(t + delay + dur + 0.03);
+    };
+    switch(name){
+      case 'jump': o('sine', 520, 180, 0.12, 0.15); break;
+      case 'bump': o('square', 170, 110, 0.08, 0.07); break;
+      case 'change': {
+        const base = [392, 494, 587, 698, 784][Math.min(4, Math.max(0, arg | 0))];
+        o('square', base, base * 1.03, 0.09, 0.09);
+        break;
+      }
+      case 'catch': o('square', 660, 990, 0.10, 0.11); o('square', 990, 1320, 0.12, 0.09, 0.08); break;
+      case 'disc': for(let i = 0; i < 4; i++) o('triangle', 330 * Math.pow(1.26, i), 0, 0.09, 0.09, i * 0.06); break;
+      case 'hatch': o('sawtooth', 130, 330, 0.32, 0.08); break;
+      case 'fall': o('sawtooth', 620, 80, 0.5, 0.13); break;
+      case 'death': noiseBurst(0.4, 0.28, 800); o('sine', 300, 40, 0.5, 0.18); break;
+      case 'level': [523, 659, 784, 1047].forEach((f, i) => o('triangle', f, 0, 0.16, 0.11, i * 0.11)); break;
+      case 'extra': [784, 988, 1175, 1568].forEach((f, i) => o('square', f, 0, 0.1, 0.08, i * 0.08)); break;
+      case 'gameover': [392, 330, 262, 196].forEach((f, i) => o('sawtooth', f, 0, 0.3, 0.11, i * 0.18)); break;
+    }
+  }
+
+  // ---------- Utilitaires ----------
+  function shade(hex, f){
+    const n = parseInt(hex.slice(1), 16);
+    const r = Math.min(255, Math.round(((n >> 16) & 255) * f));
+    const g = Math.min(255, Math.round(((n >> 8) & 255) * f));
+    const b = Math.min(255, Math.round((n & 255) * f));
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+  function buildCubes(){
+    const cfg = levelCfg();
+    cubes = [];
+    for(let r = 0; r < ROWS; r++){
+      for(let c = 0; c <= r; c++){
+        cubes.push({ r, c, x: cubeX(r, c), y: cubeY(r), state: 0, hits: cfg.hits, flash: 0 });
+      }
+    }
+  }
+  function cubeAt(r, c){
+    if(r < 0 || r >= ROWS || c < 0 || c > r) return null;
+    return cubes[r * (r + 1) / 2 + c];
+  }
+  function colorFor(cube){
+    const cfg = LEVELS[(level - 1) % LEVELS.length];
+    return cfg.colors[cube.state];
+  }
+  function addScore(n){
+    score += n;
+    if(score >= nextExtra){
+      lives = Math.min(9, lives + 1);
+      nextExtra += 8000;
+      sfx('extra');
+      addPop(player ? player.x : CX, player ? player.y - 30 : 100, '+1 VIE');
+    }
+  }
+  function addPop(x, y, text){ pops.push({ x, y, text, t: 0, life: 0.95 }); }
+  function explode(x, y, color, n){
+    for(let i = 0; i < n; i++){
+      const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 220;
+      particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.4 + Math.random() * 0.5, t: 0, color, r: 2 + Math.random() * 3 });
+    }
+  }
+
+  // ---------- Déplacements animés (sauts) ----------
+  function startHop(e, r2, c2, dur, onArrive){
+    e.moving = true; e.t = 0;
+    e.fromX = e.x; e.fromY = e.y;
+    e.r = r2; e.c = c2;
+    e.toX = cubeX(r2, c2); e.toY = cubeY(r2);
+    e.dur = dur; e.onArrive = onArrive;
+  }
+  function updateHop(e, dt){
+    if(!e.moving) return;
+    e.t += dt / e.dur;
+    const k = Math.min(1, e.t);
+    e.x = e.fromX + (e.toX - e.fromX) * k;
+    e.y = e.fromY + (e.toY - e.fromY) * k - Math.sin(k * Math.PI) * 28;
+    if(k >= 1){
+      e.moving = false;
+      const cb = e.onArrive; e.onArrive = null;
+      if(cb) cb(e);
+    }
+  }
+
+  // ---------- Cycle de vie ----------
+  function buildStars(){
+    stars = [];
+    for(let i = 0; i < 60; i++){
+      stars.push({ x: Math.random() * W, y: Math.random() * H, z: Math.random() * 0.8 + 0.2 });
+    }
+  }
+  function spawnCoilyEgg(delay){
+    coily = {
+      state: 'egg', r: 0, c: 0, x: cubeX(0, 0), y: cubeY(0),
+      moving: false, t: 0, fromX: 0, fromY: 0, toX: 0, toY: 0,
+      hatchT: delay, moveTimer: 0, vy: 0, vx: 0, spin: 0, trail: [], respawnT: 0
+    };
+  }
+  function resetPositions(){
+    player = {
+      r: 0, c: 0, x: cubeX(0, 0), y: cubeY(0),
+      fromX: cubeX(0, 0), fromY: cubeY(0), toX: 0, toY: 0, t: 0,
+      jumping: false, riding: false, rideT: 0, rideFromX: 0, rideFromY: 0, rideSide: 'left',
+      facing: 1, squash: 0, alive: true, vy: 0, vx: 0, spin: 0
+    };
+    spawnCoilyEgg(2.2);
+    balls = []; gremlins = []; uggs = [];
+    timers.ball = 2.6;
+    timers.gremlin = levelCfg().gremlinDelay;
+    timers.ugg = levelCfg().uggDelay;
+    coilyLure = null;
+    discs.left.available = true;  discs.left.respawn = 0;  discs.left.pop = 0;
+    discs.right.available = true; discs.right.respawn = 0; discs.right.pop = 0;
+  }
+  function startGame(){
+    unlockAudio();
+    score = 0; lives = 3; level = 1; nextExtra = 8000;
+    landingCount = 0; shake = 0; flash = 0; deathT = 0; clearT = 0;
+    paused = false;
+    buildCubes(); resetPositions();
+    state = 'play';
+    overlay.classList.add('hidden');
+    over2.classList.add('hidden');
+    pauseTag.classList.remove('on');
+  }
+  function die(){
+    if(state !== 'play') return;
+    state = 'dying'; deathT = 0;
+    player.alive = false; player.vy = -280; player.vx = (Math.random() - 0.5) * 160; player.spin = 0;
+    shake = 12; flash = 1;
+    explode(player.x, player.y, '#ff9b3d', 24);
+    explode(player.x, player.y, '#ffd166', 14);
+    sfx('death');
+  }
+  function gameOver(){
+    state = 'over';
+    if(score > hi){
+      hi = score;
+      try { localStorage.setItem('qbert.hi', String(hi)); } catch(e){}
+    }
+    finalScoreEl.textContent = 'SCORE : ' + score;
+    newHiEl.textContent = (score > 0 && score >= hi) ? '🏆 NOUVEAU RECORD !' : 'Record : ' + hi;
+    over2.classList.remove('hidden');
+    sfx('gameover');
+  }
+  function togglePause(){
+    if(state !== 'play') return;
+    paused = !paused;
+    pauseTag.classList.toggle('on', paused);
+  }
+
+  // ---------- Score / cubes ----------
+  function respawnDiscsOnLanding(){
+    for(const side of ['left', 'right']){
+      const d = discs[side];
+      if(!d.available){
+        d.respawn--;
+        if(d.respawn <= 0){ d.available = true; d.pop = 1; sfx('disc'); }
+      }
+    }
+  }
+  function checkLevelComplete(){
+    if(state !== 'play') return false;
+    for(const c of cubes){ if(c.state !== c.hits) return false; }
+    state = 'levelclear'; clearT = 0;
+    for(const c of cubes) c.flash = 1;
+    sfx('level');
+    return true;
+  }
+  function changeCube(cube, award){
+    if(!cube) return false;
+    cube.state = (cube.state + 1) % (cube.hits + 1);
+    cube.flash = 1;
+    if(award !== false){
+      addScore(25);
+      addPop(cube.x, cube.y - 18, '+25');
+    }
+    sfx('change', cube.state);
+    landingCount++;
+    respawnDiscsOnLanding();
+    return checkLevelComplete();
+  }
+
+  // ---------- Collisions ----------
+  function checkContacts(){
+    if(state !== 'play' || player.riding) return;
+    // Slick & Sam : Q*bert les attrape en partageant leur cube
+    for(let i = gremlins.length - 1; i >= 0; i--){
+      const g = gremlins[i];
+      if(g.r === player.r && g.c === player.c){
+        gremlins.splice(i, 1);
+        addScore(300);
+        addPop(g.x, g.y - 24, '+300');
+        explode(g.x, g.y, g.kind === 'slick' ? '#3fe08a' : '#b46bff', 12);
+        sfx('catch');
+        if(gremlins.length === 0) timers.gremlin = 8 + Math.random() * 6;
+      }
+    }
+    if(coily && coily.state === 'alive' && !coily.moving && coily.r === player.r && coily.c === player.c){ die(); return; }
+    for(const b of balls){
+      if(!b.falling && !b.moving && b.r === player.r && b.c === player.c){ die(); return; }
+    }
+    for(const u of uggs){
+      if(!u.moving && u.r === player.r && u.c === player.c){ die(); return; }
+    }
+  }
+
+  // ---------- Joueur ----------
+  function startJump(target){
+    player.jumping = true; player.t = 0;
+    player.fromX = player.x; player.fromY = player.y;
+    player.r = target.r; player.c = target.c;
+    player.toX = target.x; player.toY = target.y;
+    player.facing = target.x < player.x ? -1 : 1;
+    sfx('jump');
+  }
+  function landOnPlayerCube(){
+    player.jumping = false; player.squash = 1;
+    const cube = cubeAt(player.r, player.c);
+    if(cube) changeCube(cube, true);
+    if(state !== 'play') return;
+    checkContacts();
+  }
+  function rideDisc(side){
+    const d = discs[side];
+    d.available = false; d.respawn = 10;
+    player.riding = true; player.rideT = 0;
+    player.rideFromX = player.x; player.rideFromY = player.y;
+    player.rideSide = side;
+    addScore(50);
+    addPop(player.x, player.y - 20, '+50');
+    sfx('disc');
+    explode(discPos(side).x, discPos(side).y, '#39e6ff', 12);
+    coilyLure = { side: side, t: 8 };
+  }
+  function tryMove(dir){
+    if(state !== 'play' || paused || !player || !player.alive) return;
+    if(player.jumping || player.riding) return;
+    const d = DIRS[dir];
+    const r2 = player.r + d[0], c2 = player.c + d[1];
+    const target = cubeAt(r2, c2);
+    if(target){ startJump(target); return; }
+    // Sortie par le bas de la pyramide : disque éventuel, sinon chute.
+    if(player.r === ROWS - 1 && (dir === 'dl' || dir === 'dr')){
+      const side = dir === 'dl' ? 'left' : 'right';
+      const atCorner = (side === 'left' && player.c === 0) || (side === 'right' && player.c === 6);
+      if(atCorner && discs[side].available){ rideDisc(side); return; }
+      die();
+      return;
+    }
+    // Bord latéral : Q*bert est bloqué.
+    player.squash = 1;
+    sfx('bump');
+  }
+  function updatePlayer(dt){
+    if(player.squash > 0) player.squash = Math.max(0, player.squash - dt * 6);
+    if(player.jumping){
+      player.t += dt / JUMP_DUR;
+      const k = Math.min(1, player.t);
+      player.x = player.fromX + (player.toX - player.fromX) * k;
+      player.y = player.fromY + (player.toY - player.fromY) * k - Math.sin(k * Math.PI) * 36;
+      if(k >= 1) landOnPlayerCube();
+    } else if(player.riding){
+      player.rideT += dt;
+      const k = Math.min(1, player.rideT);
+      const ease = k * k * (3 - 2 * k);
+      const endX = cubeX(0, 0), endY = cubeY(0);
+      player.x = player.rideFromX + (endX - player.rideFromX) * ease;
+      player.y = player.rideFromY + (endY - player.rideFromY) * ease - Math.sin(k * Math.PI) * 70;
+      if(k >= 1){
+        player.riding = false;
+        player.r = 0; player.c = 0; player.x = endX; player.y = endY;
+        player.squash = 1;
+        changeCube(cubeAt(0, 0), false);
+        if(state === 'play') checkContacts();
+      }
+    }
+  }
+
+  // ---------- Coily ----------
+  function coilyToDisc(side){
+    const d = discs[side];
+    if(d.available){ d.available = false; d.respawn = 10; }
+    coily.state = 'falling';
+    coily.vy = -140; coily.vx = side === 'left' ? -60 : 60; coily.spin = 0;
+    addScore(500);
+    addPop(coily.x, coily.y - 24, '+500');
+    explode(discPos(side).x, discPos(side).y, '#b46bff', 18);
+    sfx('fall');
+    coilyLure = null;
+  }
+  function coilyFallOff(){
+    coily.state = 'falling';
+    coily.vy = 60; coily.vx = 0; coily.spin = 0;
+    sfx('fall');
+  }
+  function updateCoily(dt){
+    if(!coily) return;
+    if(coily.state === 'egg'){
+      coily.hatchT -= dt;
+      if(coily.hatchT <= 0){ coily.state = 'alive'; coily.moveTimer = 0.7; sfx('hatch'); }
+      return;
+    }
+    if(coily.state === 'gone'){
+      coily.respawnT -= dt;
+      if(coily.respawnT <= 0) spawnCoilyEgg(1.3);
+      return;
+    }
+    if(coily.state === 'falling'){
+      coily.vy += 1500 * dt;
+      coily.y += coily.vy * dt;
+      coily.x += coily.vx * dt;
+      coily.spin += dt * 8;
+      if(coily.y > H + 80){ coily.state = 'gone'; coily.respawnT = 2; }
+      return;
+    }
+    // Coily vivant : trace du corps puis déplacement
+    coily.trail.push({ x: coily.x, y: coily.y });
+    if(coily.trail.length > 36) coily.trail.shift();
+    if(coily.moving){ updateHop(coily, dt); return; }
+    coily.moveTimer -= dt;
+    if(coily.moveTimer > 0) return;
+    coily.moveTimer = levelCfg().coilyInterval;
+
+    // Coily suit Q*bert… ou le disque qu'il vient d'emprunter.
+    let targetR = player.r, targetC = player.c;
+    if(coilyLure && coilyLure.t > 0){
+      const cornerC = coilyLure.side === 'left' ? 0 : 6;
+      if(coily.r === ROWS - 1 && coily.c === cornerC){ coilyToDisc(coilyLure.side); return; }
+      targetR = ROWS - 1; targetC = cornerC;
+    }
+    const opts = [];
+    for(const k in DIRS){
+      const d = DIRS[k];
+      const r2 = coily.r + d[0], c2 = coily.c + d[1];
+      if(cubeAt(r2, c2)) opts.push([r2, c2]);
+    }
+    if(!opts.length){ coilyFallOff(); return; }
+    let best = opts[0], bestD = 1e9;
+    for(const o of opts){
+      const dd = Math.abs(o[0] - targetR) * 1.5 + Math.abs(o[1] - targetC) + Math.random() * 0.25;
+      if(dd < bestD){ bestD = dd; best = o; }
+    }
+    startHop(coily, best[0], best[1], Math.min(0.4, levelCfg().coilyInterval * 0.55), () => {
+      if(state === 'play') checkContacts();
+    });
+  }
+
+  // ---------- Balles rouges ----------
+  function spawnBall(){
+    if(balls.length >= 6) return;
+    const b = {
+      r: 0, c: 0, x: cubeX(0, 0), y: cubeY(0), moving: false, t: 0,
+      fromX: 0, fromY: 0, toX: 0, toY: 0, onArrive: null,
+      dir: Math.random() < 0.5 ? 'dl' : 'dr', falling: false, vy: 0
+    };
+    balls.push(b);
+    ballStep(b);
+  }
+  function ballStep(b){
+    if(b.falling) return;
+    const d = DIRS[b.dir];
+    const dur = 1 / levelCfg().ballSpeed;
+    let r2 = b.r + d[0], c2 = b.c + d[1];
+    if(cubeAt(r2, c2)){
+      startHop(b, r2, c2, dur, () => { if(state === 'play') checkContacts(); ballStep(b); });
+      return;
+    }
+    // Rebond sur les bords de la pyramide
+    const other = b.dir === 'dl' ? 'dr' : 'dl';
+    const d2 = DIRS[other];
+    r2 = b.r + d2[0]; c2 = b.c + d2[1];
+    if(cubeAt(r2, c2)){
+      b.dir = other;
+      startHop(b, r2, c2, dur, () => { if(state === 'play') checkContacts(); ballStep(b); });
+      return;
+    }
+    // Plus aucune case : la balle tombe dans le vide.
+    b.falling = true; b.vy = 0;
+  }
+  function updateBalls(dt){
+    for(let i = balls.length - 1; i >= 0; i--){
+      const b = balls[i];
+      if(b.falling){
+        b.vy += 1400 * dt;
+        b.y += b.vy * dt;
+        if(b.y > H + 40) balls.splice(i, 1);
+      } else {
+        updateHop(b, dt);
+      }
+    }
+  }
+
+  // ---------- Slick & Sam ----------
+  function spawnGremlins(){
+    const side = Math.random() < 0.5 ? 'left' : 'right';
+    const r0 = 2 + Math.floor(Math.random() * 4);
+    const slickC = side === 'left' ? 0 : r0;
+    gremlins.push({
+      kind: 'slick', r: r0, c: slickC, x: cubeX(r0, slickC), y: cubeY(r0),
+      moving: false, t: 0, fromX: 0, fromY: 0, toX: 0, toY: 0, onArrive: null, mode: 'down'
+    });
+    const other = side === 'left' ? 'right' : 'left';
+    const r1 = 1 + Math.floor(Math.random() * 3);
+    const samC = other === 'left' ? 0 : r1;
+    gremlins.push({
+      kind: 'sam', r: r1, c: samC, x: cubeX(r1, samC), y: cubeY(r1),
+      moving: false, t: 0, fromX: 0, fromY: 0, toX: 0, toY: 0, onArrive: null, mode: 'up'
+    });
+    sfx('hatch');
+  }
+  function revertCube(g){
+    const cube = cubeAt(g.r, g.c);
+    if(!cube) return;
+    cube.state = Math.max(0, cube.state - 1);
+    cube.flash = 0.6;
+  }
+  function removeGremlin(g){
+    const i = gremlins.indexOf(g);
+    if(i >= 0) gremlins.splice(i, 1);
+    if(gremlins.length === 0) timers.gremlin = 8 + Math.random() * 6;
+  }
+  function gremlinStep(g){
+    const down = g.mode === 'down';
+    const cands = [];
+    const a = [g.r + (down ? 1 : -1), g.c + (down ? 0 : -1)];
+    const b = [g.r + (down ? 1 : -1), g.c + (down ? 1 : 0)];
+    if(cubeAt(a[0], a[1])) cands.push(a);
+    if(cubeAt(b[0], b[1])) cands.push(b);
+    if(!cands.length){ removeGremlin(g); return; }
+    const pick = cands[Math.floor(Math.random() * cands.length)];
+    startHop(g, pick[0], pick[1], 0.34, () => {
+      revertCube(g);
+      if(state === 'play') checkContacts();
+      gremlinStep(g);
+    });
+  }
+  function updateGremlins(dt){
+    for(const g of gremlins.slice()){
+      if(g.moving) updateHop(g, dt);
+      else if(!g.started){ g.started = true; gremlinStep(g); }
+    }
+  }
+
+  // ---------- Ugg & Wrongway ----------
+  function spawnUggs(){
+    uggs.push({ kind: 'ugg', r: 6, c: 0, x: cubeX(6, 0), y: cubeY(6), moving: false, t: 0, fromX: 0, fromY: 0, toX: 0, toY: 0, onArrive: null, started: false });
+    uggs.push({ kind: 'wrongway', r: 6, c: 6, x: cubeX(6, 6), y: cubeY(6), moving: false, t: 0, fromX: 0, fromY: 0, toX: 0, toY: 0, onArrive: null, started: false });
+  }
+  function removeUgg(u){
+    const i = uggs.indexOf(u);
+    if(i >= 0) uggs.splice(i, 1);
+    if(uggs.length === 0) timers.ugg = 9 + Math.random() * 6;
+  }
+  function uggStep(u){
+    const cands = [];
+    const a = [u.r - 1, u.c - 1];
+    const b = [u.r - 1, u.c];
+    if(cubeAt(a[0], a[1])) cands.push(a);
+    if(cubeAt(b[0], b[1])) cands.push(b);
+    if(!cands.length){ removeUgg(u); return; }
+    // Ugg longe le bord gauche, Wrongway le bord droit.
+    cands.sort((p, q) => u.kind === 'ugg' ? p[1] - q[1] : q[1] - p[1]);
+    const pick = cands[0];
+    startHop(u, pick[0], pick[1], 0.5, () => {
+      if(state === 'play') checkContacts();
+      uggStep(u);
+    });
+  }
+  function updateUggs(dt){
+    for(const u of uggs.slice()){
+      if(u.moving) updateHop(u, dt);
+      else if(!u.started){ u.started = true; uggStep(u); }
+    }
+  }
+
+  // ---------- Particules / étoiles / scores flottants ----------
+  function updateParticles(dt){
+    for(let i = particles.length - 1; i >= 0; i--){
+      const p = particles[i];
+      p.t += dt;
+      if(p.t >= p.life){ particles.splice(i, 1); continue; }
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.98; p.vy *= 0.98;
+    }
+  }
+  function updatePops(dt){
+    for(let i = pops.length - 1; i >= 0; i--){
+      const p = pops[i];
+      p.t += dt; p.y -= 32 * dt;
+      if(p.t >= p.life) pops.splice(i, 1);
+    }
+  }
+  function updateStars(dt){
+    for(const s of stars){
+      s.y += (14 + 60 * s.z) * dt;
+      if(s.y > H + 2){ s.y = -2; s.x = Math.random() * W; }
+    }
+  }
+  function updateDiscs(dt){
+    for(const side of ['left', 'right']){
+      const d = discs[side];
+      if(d.pop > 0) d.pop = Math.max(0, d.pop - dt * 2.5);
+    }
+  }
+
+  // ---------- Boucle logique ----------
+  function update(dt){
+    time += dt;
+    updateStars(dt);
+    updateParticles(dt);
+    updatePops(dt);
+    for(const c of cubes){ if(c.flash > 0) c.flash = Math.max(0, c.flash - dt * 3.5); }
+    if(shake > 0) shake = Math.max(0, shake - dt * 30);
+    if(flash > 0) flash = Math.max(0, flash - dt * 2.5);
+
+    if(state === 'play'){
+      updatePlayer(dt);
+      if(state !== 'play') return;
+      updateCoily(dt);
+      updateBalls(dt);
+      updateGremlins(dt);
+      updateUggs(dt);
+      updateDiscs(dt);
+      timers.ball -= dt;
+      if(timers.ball <= 0){
+        spawnBall();
+        timers.ball = levelCfg().ballInterval * (0.7 + Math.random() * 0.6);
+      }
+      timers.gremlin -= dt;
+      if(timers.gremlin <= 0 && gremlins.length === 0) spawnGremlins();
+      timers.ugg -= dt;
+      if(timers.ugg <= 0 && uggs.length === 0) spawnUggs();
+      if(coilyLure){
+        coilyLure.t -= dt;
+        if(coilyLure.t <= 0) coilyLure = null;
+      }
+      checkContacts();
+    } else if(state === 'dying'){
+      deathT += dt;
+      player.vy += 1500 * dt;
+      player.y += player.vy * dt;
+      player.x += player.vx * dt;
+      player.spin += dt * 7;
+      if(deathT > 1.5){
+        lives--;
+        if(lives <= 0) gameOver();
+        else { resetPositions(); state = 'play'; }
+      }
+    } else if(state === 'levelclear'){
+      clearT += dt;
+      if(clearT > 2.2){
+        level++;
+        buildCubes();
+        resetPositions();
+        state = 'play';
+      }
+    }
+  }
+
+  // ---------- Rendu ----------
+  function drawBackground(){
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#0a0420'); g.addColorStop(0.5, '#130733'); g.addColorStop(1, '#04010c');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    let nb = ctx.createRadialGradient(120, 150, 10, 120, 150, 230);
+    nb.addColorStop(0, 'rgba(124,60,255,0.16)'); nb.addColorStop(1, 'rgba(124,60,255,0)');
+    ctx.fillStyle = nb; ctx.fillRect(0, 0, W, H);
+    nb = ctx.createRadialGradient(370, 320, 10, 370, 320, 250);
+    nb.addColorStop(0, 'rgba(0,180,255,0.13)'); nb.addColorStop(1, 'rgba(0,180,255,0)');
+    ctx.fillStyle = nb; ctx.fillRect(0, 0, W, H);
+  }
+  function drawStars(){
+    for(const s of stars){
+      const r = s.z * 1.6 + 0.4;
+      ctx.fillStyle = 'rgba(180,200,255,' + (0.22 + s.z * 0.55) + ')';
+      ctx.fillRect(s.x, s.y, r, r);
+    }
+  }
+  function drawCube(c){
+    const col = colorFor(c);
+    const x = c.x, y = c.y;
+    // Faces latérales (assombries)
+    ctx.fillStyle = shade(col, 0.42);
+    ctx.beginPath();
+    ctx.moveTo(x - HW, y); ctx.lineTo(x, y + HH); ctx.lineTo(x, y + HH + SIDE); ctx.lineTo(x - HW, y + SIDE);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = shade(col, 0.26);
+    ctx.beginPath();
+    ctx.moveTo(x + HW, y); ctx.lineTo(x, y + HH); ctx.lineTo(x, y + HH + SIDE); ctx.lineTo(x + HW, y + SIDE);
+    ctx.closePath(); ctx.fill();
+    // Face supérieure
+    ctx.save();
+    if(c.flash > 0){ ctx.shadowColor = col; ctx.shadowBlur = 20 * c.flash; }
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(x, y - HH); ctx.lineTo(x + HW, y); ctx.lineTo(x, y + HH); ctx.lineTo(x - HW, y);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    // Liseré néon
+    ctx.strokeStyle = 'rgba(255,255,255,' + (0.2 + 0.55 * c.flash) + ')';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x, y - HH); ctx.lineTo(x + HW, y); ctx.lineTo(x, y + HH); ctx.lineTo(x - HW, y);
+    ctx.closePath(); ctx.stroke();
+  }
+  function drawCubes(){ for(const c of cubes) drawCube(c); }
+  function drawDiscAt(x, y, s){
+    const spin = time * 4;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(s, s);
+    ctx.shadowColor = '#39e6ff'; ctx.shadowBlur = 16;
+    ctx.fillStyle = '#0b2a3a';
+    ctx.beginPath(); ctx.ellipse(0, 0, 17, 8, 0, 0, 7); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#39e6ff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(0, 0, 17, 8, 0, 0, 7); ctx.stroke();
+    for(let i = 0; i < 3; i++){
+      const a = spin + i * Math.PI / 3;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 4, Math.sin(a) * 2);
+      ctx.lineTo(Math.cos(a) * 14, Math.sin(a) * 7);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function drawDiscs(){
+    for(const side of ['left', 'right']){
+      const d = discs[side];
+      if(!d.available) continue;
+      const p = discPos(side);
+      const s = 1 + (d.pop > 0 ? Math.sin(d.pop * Math.PI) * 0.35 : 0);
+      drawDiscAt(p.x, p.y, s);
+    }
+  }
+  function drawEgg(x, y, hatchT){
+    const wig = hatchT < 1.2 ? Math.sin(time * 30) * 2 : 0;
+    ctx.save();
+    ctx.translate(x + wig, y);
+    ctx.shadowColor = '#b46bff'; ctx.shadowBlur = 12;
+    ctx.fillStyle = '#efe6ff';
+    ctx.beginPath(); ctx.ellipse(0, 0, 11, 14, 0, 0, 7); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#b46bff';
+    for(const p of [[-4, -6], [4, -2], [-3, 4], [3, 8]]){
+      ctx.beginPath(); ctx.arc(p[0], p[1], 2.2, 0, 7); ctx.fill();
+    }
+    ctx.restore();
+  }
+  function drawCoily(){
+    if(!coily || coily.state === 'gone') return;
+    if(coily.state === 'egg'){ drawEgg(coily.x, coily.y - 8, coily.hatchT); return; }
+    // Corps (traînée)
+    if(coily.trail.length > 1){
+      for(let i = 0; i < coily.trail.length; i += 4){
+        const p = coily.trail[i];
+        const f = 1 - i / coily.trail.length;
+        ctx.fillStyle = 'rgba(150,80,255,' + (0.2 + 0.5 * f) + ')';
+        ctx.beginPath(); ctx.arc(p.x, p.y - 8, 9 * f + 3, 0, 7); ctx.fill();
+      }
+    }
+    ctx.save();
+    ctx.translate(coily.x, coily.y - 10);
+    if(coily.state === 'falling') ctx.rotate(coily.spin);
+    ctx.shadowColor = '#b46bff'; ctx.shadowBlur = 14;
+    ctx.fillStyle = '#8a3cff';
+    ctx.beginPath(); ctx.ellipse(0, 0, 12, 11, 0, 0, 7); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(-4, -3, 3.4, 0, 7); ctx.arc(4, -3, 3.4, 0, 7); ctx.fill();
+    ctx.fillStyle = '#2a0a4a';
+    ctx.beginPath(); ctx.arc(-4, -3, 1.7, 0, 7); ctx.arc(4, -3, 1.7, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#ff5c8a'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, 8); ctx.lineTo(0, 14);
+    ctx.moveTo(0, 14); ctx.lineTo(-4, 18);
+    ctx.moveTo(0, 14); ctx.lineTo(4, 18);
+    ctx.stroke();
+    ctx.restore();
+  }
+  function drawBalls(){
+    for(const b of balls){
+      ctx.save();
+      ctx.translate(b.x, b.y - 10);
+      ctx.shadowColor = '#ff3d5a'; ctx.shadowBlur = 14;
+      ctx.fillStyle = '#ff3d5a';
+      ctx.beginPath(); ctx.arc(0, 0, 10, 0, 7); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.beginPath(); ctx.arc(-3, -3, 3, 0, 7); ctx.fill();
+      ctx.restore();
+    }
+  }
+  function drawGremlin(g, col){
+    ctx.save();
+    ctx.translate(g.x, g.y - 10);
+    ctx.shadowColor = col; ctx.shadowBlur = 12;
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.arc(0, 0, 10, 0, 7);
+    ctx.moveTo(-8, -6); ctx.lineTo(-13, -16); ctx.lineTo(-3, -10);
+    ctx.moveTo(8, -6); ctx.lineTo(13, -16); ctx.lineTo(3, -10);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(-3.5, -2, 3, 0, 7); ctx.arc(3.5, -2, 3, 0, 7); ctx.fill();
+    ctx.fillStyle = '#141024';
+    ctx.beginPath(); ctx.arc(-3.5, -2, 1.5, 0, 7); ctx.arc(3.5, -2, 1.5, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#141024'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(0, 4, 4, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+    ctx.restore();
+  }
+  function drawGremlins(){
+    for(const g of gremlins) drawGremlin(g, g.kind === 'slick' ? '#3fe08a' : '#b46bff');
+  }
+  function drawUggs(){
+    for(const u of uggs) drawGremlin(u, u.kind === 'ugg' ? '#ff5c5c' : '#ff9b3d');
+  }
+  function drawPlayer(){
+    if(!player) return;
+    const p = player;
+    const bob = p.jumping ? 0 : Math.sin(time * 6) * 1.5;
+    ctx.save();
+    ctx.translate(p.x, p.y - 10 + bob);
+    if(p.riding || !p.alive) ctx.rotate(p.spin || 0);
+    const sq = p.squash || 0;
+    ctx.scale(1 + sq * 0.2, 1 - sq * 0.2);
+    // Ombre
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx.beginPath(); ctx.ellipse(0, 13, 13, 5, 0, 0, 7); ctx.fill();
+    // Corps
+    ctx.shadowColor = '#ff9b3d'; ctx.shadowBlur = 14;
+    ctx.fillStyle = '#ff9b3d';
+    ctx.beginPath(); ctx.ellipse(0, 0, 13, 12, 0, 0, 7); ctx.fill();
+    ctx.shadowBlur = 0;
+    // Trompe
+    ctx.fillStyle = '#ffb35c';
+    ctx.beginPath(); ctx.ellipse(0, 8, 4, 6, 0, 0, 7); ctx.fill();
+    // Yeux
+    const ex = p.facing * 2;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(ex - 4, -4, 4, 0, 7); ctx.arc(ex + 4, -4, 4, 0, 7); ctx.fill();
+    ctx.fillStyle = '#221033';
+    ctx.beginPath(); ctx.arc(ex - 4, -4, 2, 0, 7); ctx.arc(ex + 4, -4, 2, 0, 7); ctx.fill();
+    // Pieds
+    ctx.fillStyle = '#e07f22';
+    ctx.beginPath(); ctx.ellipse(-6, 12, 5, 3, 0, 0, 7); ctx.ellipse(6, 12, 5, 3, 0, 0, 7); ctx.fill();
+    ctx.restore();
+    if(p.riding) drawDiscAt(p.x, p.y + 10, 1);
+  }
+  function drawParticles(){
+    for(const p of particles){
+      ctx.globalAlpha = Math.max(0, 1 - p.t / p.life);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (1 - p.t / p.life) + 0.5, 0, 7); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  function drawPops(){
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '800 15px "Segoe UI",sans-serif';
+    for(const p of pops){
+      ctx.globalAlpha = Math.max(0, 1 - p.t / p.life);
+      ctx.fillStyle = '#7CFF5E';
+      ctx.fillText(p.text, p.x, p.y);
+    }
+    ctx.globalAlpha = 1;
+  }
+  function drawHUD(){
+    ctx.textBaseline = 'top';
+    // Score
+    ctx.textAlign = 'left';
+    ctx.font = '700 12px "Segoe UI",sans-serif'; ctx.fillStyle = '#7fb6ff';
+    ctx.fillText('SCORE', 18, 16);
+    ctx.font = '800 26px Consolas,Menlo,monospace'; ctx.fillStyle = '#ffffff';
+    ctx.fillText(String(score), 18, 30);
+    // Niveau + couleur cible
+    ctx.textAlign = 'center';
+    ctx.font = '700 12px "Segoe UI",sans-serif'; ctx.fillStyle = '#9dfffc';
+    ctx.fillText('NIVEAU ' + level, W / 2, 18);
+    const cfg = LEVELS[(level - 1) % LEVELS.length];
+    const target = cfg.colors[cfg.hits];
+    ctx.save();
+    ctx.translate(W / 2, 48);
+    ctx.shadowColor = target; ctx.shadowBlur = 10;
+    ctx.fillStyle = target;
+    ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(14, 0); ctx.lineTo(0, 8); ctx.lineTo(-14, 0);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    // Record
+    ctx.textAlign = 'right';
+    ctx.font = '700 12px "Segoe UI",sans-serif'; ctx.fillStyle = '#7fb6ff';
+    ctx.fillText('RECORD', W - 18, 16);
+    ctx.font = '800 20px Consolas,Menlo,monospace'; ctx.fillStyle = '#ffd166';
+    ctx.fillText(String(hi), W - 18, 32);
+    // Vies (mini Q*bert)
+    for(let i = 0; i < lives; i++){
+      const x = 26 + i * 20, y = 76;
+      ctx.fillStyle = '#ff9b3d';
+      ctx.beginPath(); ctx.arc(x, y, 7, 0, 7); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(x - 2.5, y - 2, 2.2, 0, 7); ctx.arc(x + 2.5, y - 2, 2.2, 0, 7); ctx.fill();
+      ctx.fillStyle = '#221033';
+      ctx.beginPath(); ctx.arc(x - 2.5, y - 2, 1.1, 0, 7); ctx.arc(x + 2.5, y - 2, 1.1, 0, 7); ctx.fill();
+    }
+  }
+  function draw(){
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#04010c';
+    ctx.fillRect(0, 0, cssW, cssH);
+    const sx = shake > 0 ? (Math.random() - 0.5) * shake : 0;
+    const sy = shake > 0 ? (Math.random() - 0.5) * shake : 0;
+    ctx.setTransform(dpr * sc, 0, 0, dpr * sc, dpr * (ox + sx), dpr * (oy + sy));
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+    drawBackground();
+    drawStars();
+    drawCubes();
+    drawDiscs();
+    drawBalls();
+    drawGremlins();
+    drawUggs();
+    drawCoily();
+    if(player) drawPlayer();
+    drawParticles();
+    drawPops();
+    drawHUD();
+    if(flash > 0){
+      ctx.globalAlpha = Math.min(1, flash);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  // ---------- Entrées : clavier ----------
+  const KEYMAP = {
+    ArrowUp: 'ul', KeyW: 'ul',
+    ArrowRight: 'ur', KeyD: 'ur',
+    ArrowDown: 'dr', KeyS: 'dr',
+    ArrowLeft: 'dl', KeyA: 'dl'
+  };
+  window.addEventListener('keydown', e => {
+    if(e.code === 'KeyP' || e.code === 'Escape'){ togglePause(); return; }
+    if(e.code === 'Enter' || e.code === 'NumpadEnter'){
+      unlockAudio();
+      if(state === 'menu' || state === 'over') startGame();
+      else if(paused) togglePause();
+      return;
+    }
+    const dir = KEYMAP[e.code];
+    if(dir){
+      e.preventDefault();
+      unlockAudio();
+      tryMove(dir);
+    }
+  });
+
+  // ---------- Entrées : tactile (swipe) ----------
+  let touchStart = null;
+  canvas.addEventListener('touchstart', e => {
+    unlockAudio();
+    if(e.touches.length === 1){
+      touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+  }, { passive: true });
+  canvas.addEventListener('touchend', e => {
+    if(!touchStart) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStart.x, dy = t.clientY - touchStart.y;
+    touchStart = null;
+    if(Math.hypot(dx, dy) < 24) return;
+    if(state === 'menu' || state === 'over'){ startGame(); return; }
+    // Direction diagonale la plus proche du geste.
+    const cands = [['ul', -1, -1], ['ur', 1, -1], ['dl', -1, 1], ['dr', 1, 1]];
+    let best = 'ul', bestDot = -1e9;
+    for(const c of cands){
+      const dot = (dx * c[1] + dy * c[2]) / Math.hypot(dx, dy);
+      if(dot > bestDot){ bestDot = dot; best = c[0]; }
+    }
+    tryMove(best);
+  }, { passive: true });
+
+  // ---------- Entrées : D-pad tactile ----------
+  document.querySelectorAll('.dbtn').forEach(btn => {
+    const dir = btn.dataset.dir;
+    const trigger = e => {
+      e.preventDefault();
+      unlockAudio();
+      if(state === 'menu' || state === 'over'){ startGame(); return; }
+      tryMove(dir);
+    };
+    btn.addEventListener('touchstart', trigger, { passive: false });
+    btn.addEventListener('mousedown', trigger);
+  });
+
+  // ---------- Boutons ----------
+  startBtn.addEventListener('click', () => startGame());
+  restartBtn.addEventListener('click', () => startGame());
+
+  // ---------- Boucle principale ----------
+  let last = 0;
+  function loop(ts){
+    requestAnimationFrame(loop);
+    const dt = Math.min(0.05, ((ts - last) / 1000) || 0.016);
+    last = ts;
+    if(!paused) update(dt);
+    draw();
+  }
+
+  // ---------- Démarrage ----------
+  buildStars();
+  buildCubes();
+  resetPositions();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
