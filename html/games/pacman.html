@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-<meta name="description" content="PAC-MAN — Dévore les pastilles et les super pastilles, esquive les fantômes ou fais-leur avaler leur peur ! Clavier (flèches / ZQSD) ou tactile (glisser)."/>
+<meta name="description" content="PAC-MAN — Dévore les pastilles et les super pastilles, esquive les fantômes ou fais-leur avaler leur peur ! Clavier (flèches / ZQSD) ou tactile (glisser en continu)."/>
 <meta name="theme-color" content="#030a18"/>
 <title>Pac-Man — Le Dévoreur</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🟡</text></svg>"/>
@@ -15,19 +15,23 @@
   canvas{display:block;touch-action:none;}
 
   /* ---------- HUD ---------- */
-  #hud{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:26px;
+  #hud{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:20px;
     padding:10px 18px;pointer-events:none;z-index:5;
-    background:linear-gradient(rgba(0,0,0,.55),transparent);}
+    background:linear-gradient(rgba(0,0,0,.65),transparent);}
   #hud.hidden{display:none;}
   #hud .stat{display:flex;flex-direction:column;gap:2px;}
   #hud .label{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#7fb6e0;}
   #hud .value{font-size:19px;font-weight:700;}
   #livesWrap{margin-left:auto;display:flex;flex-direction:column;gap:2px;align-items:flex-end;}
-  #livesIcons{font-size:18px;color:#ffd83d;letter-spacing:2px;line-height:1;}
+  #livesIcons{display:flex;align-items:center;min-height:18px;}
+  .hudBtn{pointer-events:auto;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);
+    color:#ffd83d;border-radius:8px;padding:6px 12px;font-size:16px;cursor:pointer;
+    transition:background .15s, transform .1s;}
+  .hudBtn:hover{background:rgba(255,255,255,.18);transform:scale(1.05);}
 
   /* ---------- Écrans ---------- */
   .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:12px;background:radial-gradient(ellipse at center,rgba(3,12,28,.72),rgba(0,0,0,.94));
+    gap:12px;background:radial-gradient(ellipse at center,rgba(3,12,28,.78),rgba(0,0,0,.95));
     z-index:10;text-align:center;padding:22px;}
   .overlay.hidden{display:none;}
   .overlay h1{margin:0;font-size:clamp(38px,9vw,78px);letter-spacing:8px;color:#ffe14d;
@@ -61,23 +65,25 @@
   <div class="stat"><span class="label">Record</span><span class="value" id="highscore">0</span></div>
   <div class="stat"><span class="label">Niveau</span><span class="value" id="level">1</span></div>
   <div id="livesWrap"><span class="label">Vies</span><div id="livesIcons"></div></div>
+  <button id="pauseBtn" class="hudBtn" title="Pause (P)">⏸</button>
 </div>
 <div id="pauseTag">PAUSE</div>
 
 <div id="overlay" class="overlay">
   <h1>PAC-MAN</h1>
   <div class="sub">Le Dévoreur</div>
-  <p>Dévore toutes les pastilles pour passer au niveau suivant. Les <b>super pastilles</b> rendent les fantômes vulnérables quelques secondes&nbsp;: fonce et gobe-les pour marquer gros&nbsp;!</p>
+  <p>Dévore toutes les pastilles pour passer au niveau suivant. Les <b>super pastilles</b> rendent les fantômes vulnérables quelques secondes&nbsp;: fonce et gobe-les pour marquer gros&nbsp;! Emprunte le tunnel latéral pour semer les fantômes qui y sont ralentis.</p>
   <div class="legend">
     <span class="chip">🔵 Pastille <b>+10</b></span>
     <span class="chip">🟡 Super pastille <b>+50</b></span>
     <span class="chip">👻 Fantôme <b>+200 à +1600</b></span>
     <span class="chip">🍒 Fruit <b>+100 et +</b></span>
+    <span class="chip">⭐ Vie bonus <b>10 000 pts</b></span>
   </div>
   <div class="legend">
     <span class="chip"><kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> Direction</span>
     <span class="chip"><kbd>P</kbd> Pause</span>
-    <span class="chip">📱 Glisser : direction</span>
+    <span class="chip">📱 Glisser : direction continue</span>
   </div>
   <button id="startBtn">▶ Jouer</button>
 </div>
@@ -104,33 +110,34 @@
   const over2 = document.getElementById('over2');
   const startBtn = document.getElementById('startBtn');
   const restartBtn = document.getElementById('restartBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
   const finalScoreEl = document.getElementById('finalScore');
   const newHiEl = document.getElementById('newHi');
   const pauseTag = document.getElementById('pauseTag');
 
-  // ---------- Labyrinthe (19 x 21) ----------
+  // ---------- Labyrinthe (19 x 21) avec vrai tunnel latéral en ligne 7 ----------
   const MAZE = [
-    "###################",
-    "#........#........#",
-    "#o##.###.#.###.##o#",
-    "#.................#",
-    "#.##.#.#####.#.##.#",
-    "#....#...#...#....#",
-    "####.###.#.###.####",
-    "   #...........#   ",
-    "####.# ## ## #.####",
-    "     #.## ##.#     ",
-    "     #.#   #.#     ",
-    "     #.#####.#     ",
-    "####.# ## ## #.####",
-    "   #...........#   ",
-    "####.#.#####.#.####",
-    "#........#........#",
-    "#.##.###.#.###.##.#",
-    "#o.#..... .....#.o#",
-    "##.#.#.#####.#.#.##",
-    "#....#...#...#....#",
-    "###################",
+    "###################", // 0
+    "#........#........#", // 1
+    "#o##.###.#.###.##o#", // 2
+    "#.................#", // 3
+    "#.##.#.#####.#.##.#", // 4
+    "#....#...#...#....#", // 5
+    "####.###.#.###.####", // 6
+    "    ...........    ", // 7 TUNNEL LATÉRAL TRAVERSANT (wrap-around)
+    "####.#.## ##.#.####", // 8
+    "####.#.##-##.#.####", // 9 PORTE DU REPAIRE
+    "####.#.#   #.#.####", // 10 REPAIRE DES FANTÔMES
+    "####.#.#####.#.####", // 11
+    "####.#.......#.####", // 12 COULOIR SOUS LE REPAIRE
+    "####.###.#.###.####", // 13
+    "####.#.#####.#.####", // 14
+    "#........#........#", // 15
+    "#.##.###.#.###.##.#", // 16
+    "#o.#..... .....#.o#", // 17 DÉPART DE PAC-MAN (9, 17)
+    "##.#.#.#####.#.#.##", // 18
+    "#....#...#...#....#", // 19
+    "###################", // 20
   ];
   const COLS = MAZE[0].length;
   const ROWS = MAZE.length;
@@ -140,21 +147,18 @@
   const TAU = Math.PI * 2;
 
   // Positions clés
-  const SPAWN = {x:9, y:17};             // départ de Pac-Man
-  const DOOR  = {x:9, y:9};              // porte du repaire des fantômes
-  const HOUSE = {x:9, y:10};             // centre du repaire
-  const FRUIT_POS = {x:9, y:13};         // apparition du fruit bonus
+  const SPAWN     = {x:9, y:17};         // départ de Pac-Man
+  const DOOR      = {x:9, y:9};          // porte du repaire des fantômes
+  const HOUSE     = {x:9, y:10};         // centre du repaire
+  const FRUIT_POS = {x:9, y:12};         // apparition du fruit bonus sous la maison
 
   // ---------- Mise à l'échelle ----------
   let dpr = 1, sc = 1, ox = 0, oy = 0;
   function resize(){
     dpr = Math.max(1, window.devicePixelRatio || 1);
     const cw = window.innerWidth, ch = window.innerHeight;
-    // Taille du tampon de dessin (netteté en haut DPR)…
     canvas.width = Math.round(cw * dpr);
     canvas.height = Math.round(ch * dpr);
-    // …mais l'élément est affiché à la taille du viewport (sinon le canvas
-    // déborde de l'écran sur tablette/téléphone où le DPR est > 1).
     canvas.style.width = cw + 'px';
     canvas.style.height = ch + 'px';
     sc = Math.min(cw / W, ch / H);
@@ -165,20 +169,22 @@
 
   // ---------- Accès au labyrinthe ----------
   function isWall(x, y){
+    if (y === 7 && (x < 0 || x >= COLS)) return false; // tunnel traversant
     if (y < 0 || y >= ROWS) return true;
     if (x < 0 || x >= COLS) return true;
     return MAZE[y][x] === '#';
   }
   function isPacWall(x, y){
+    if (y === 7 && (x < 0 || x >= COLS)) return false; // tunnel traversant
     if (isWall(x, y)) return true;
-    if (x === DOOR.x && y === DOOR.y) return true;   // la porte est infranchissable pour Pac-Man
+    if (x === DOOR.x && y === DOOR.y) return true;      // porte infranchissable pour Pac-Man
     return false;
   }
-  // Passage réservé aux fantômes (repaire + porte)
   function isGhostPassable(x, y, g){
+    if (y === 7 && (x < 0 || x >= COLS)) return true;   // tunnel traversant
     if (isWall(x, y)) return false;
-    if (y === 10 && x >= 8 && x <= 10) return g.mode === 'house' || g.mode === 'eaten';  // intérieur du repaire
-    if (x === DOOR.x && y === DOOR.y) return g.mode === 'eaten';                          // porte
+    if (y === 10 && x >= 8 && x <= 10) return g.mode === 'house' || g.mode === 'eaten' || g.mode === 'leaving' || g.mode === 'entering';
+    if (x === DOOR.x && y === DOOR.y) return g.mode === 'eaten' || g.mode === 'leaving' || g.mode === 'entering';
     return true;
   }
 
@@ -186,17 +192,19 @@
   let state = 'menu';                    // menu | play | over
   let paused = false;
   let score = 0, hi = 0, lives = 3, level = 1;
-  let dotsLeft = 0, dotEaten = 0;
+  let dotsLeft = 0, dotEaten = 0, totalDots = 0;
+  let nextExtraLife = 10000;
   let powerTimer = 0, ghostCombo = 0;    // vulnérabilité des fantômes
   let modeTimer = 0, phase = false;      // mode des fantômes : scatter(false) / chase(true)
   let fruit = null, fruitTimer = 0;
   let deathAnim = 0;
-  let anim = 0;                          // horloge de dessin (bouche, clignotements…)
+  let clearTimer = 0;                    // animation de fin de niveau
+  let anim = 0;                          // horloge d'animation globale
   let floaters = [];                     // "+200" flottants
   let bannerText = '', bannerTimer = 0;
   try { hi = +localStorage.getItem('pacman.hi') || 0; } catch(e){}
 
-  // pastilles
+  // Pastilles
   let dots = [], powers = [];
   for (let y = 0; y < ROWS; y++){
     dots.push(new Array(COLS).fill(false));
@@ -211,23 +219,83 @@
     { name:'Blinky', color:'#ff4f4f', scatter:{x:18,y:0},  delay:0,  start:{x:9,y:8}  },
     { name:'Pinky',  color:'#ff9ad5', scatter:{x:0,y:0},   delay:3,  start:{x:9,y:10} },
     { name:'Inky',   color:'#5fd7ff', scatter:{x:18,y:20}, delay:6,  start:{x:8,y:10} },
-    { name:'Clyde',  color:'#ffb45e', scatter:{x:0,y:20},  delay:10, start:{x:10,y:10} },
+    { name:'Clyde',  color:'#ffb45e', scatter:{x:0,y:20},  delay:9,  start:{x:10,y:10} },
   ];
   let ghosts = [];
 
+  // Table des fruits par niveau
+  const FRUIT_INFO = [
+    { name: 'Cerises', val: 100,  color: '#ff2d55' },
+    { name: 'Fraise',  val: 300,  color: '#ff3366' },
+    { name: 'Orange',  val: 500,  color: '#ff9800' },
+    { name: 'Pomme',   val: 700,  color: '#e53935' },
+    { name: 'Melon',   val: 1000, color: '#43a047' },
+    { name: 'Galaxian',val: 2000, color: '#ffd600' },
+    { name: 'Cloche',  val: 3000, color: '#ffea00' },
+    { name: 'Clé',     val: 5000, color: '#00e5ff' }
+  ];
+
   // ---------- Vitesses (cases / seconde) ----------
-  const PAC_SPEED = 2.8, GHOST_SPEED = 2.5, FRIGHT_SPEED = 1.3, EYE_SPEED = 4.6;
+  const PAC_SPEED = 2.9, GHOST_SPEED = 2.5, FRIGHT_SPEED = 1.3, EYE_SPEED = 4.8;
   function speedMult(){ return Math.min(1.35, 1 + 0.05 * (level - 1)); }
 
-  // ---------- Audio (synthèse WebAudio) ----------
+  // ---------- Audio WebAudio ----------
   let actx = null;
+  let sirenOsc = null, sirenGain = null;
+  let lastDotBeep = 0;
+  let dotToneAlt = false;
+
   function ensureAudio(){
     try{
-      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (!actx) {
+        actx = new (window.AudioContext || window.webkitAudioContext)();
+        initSiren();
+      }
       if (actx.state === 'suspended') actx.resume();
     }catch(e){}
   }
-  let lastDotBeep = 0;
+
+  function initSiren(){
+    try{
+      sirenOsc = actx.createOscillator();
+      sirenGain = actx.createGain();
+      sirenOsc.type = 'triangle';
+      sirenGain.gain.setValueAtTime(0, actx.currentTime);
+      sirenOsc.connect(sirenGain);
+      sirenGain.connect(actx.destination);
+      sirenOsc.start();
+    }catch(e){}
+  }
+
+  function updateSiren(){
+    if (!sirenGain || !actx) return;
+    const t0 = actx.currentTime;
+    if (state !== 'play' || paused || deathAnim > 0 || clearTimer > 0){
+      sirenGain.gain.cancelScheduledValues(t0);
+      sirenGain.gain.setValueAtTime(0, t0);
+      return;
+    }
+    const hasEaten = ghosts.some(g => g.mode === 'eaten');
+    if (hasEaten){
+      // Son rapide de fuite des yeux
+      const freq = 650 + Math.sin(anim * 18) * 180;
+      sirenOsc.frequency.setValueAtTime(freq, t0);
+      sirenGain.gain.setValueAtTime(0.04, t0);
+    } else if (powerTimer > 0){
+      // Alarme rapide quand les fantômes sont vulnérables
+      const freq = 220 + Math.sin(anim * 10) * 80;
+      sirenOsc.frequency.setValueAtTime(freq, t0);
+      sirenGain.gain.setValueAtTime(0.045, t0);
+    } else {
+      // Sirène continue qui s'accélère avec le décompte des pastilles
+      const progress = totalDots > 0 ? (1 - dotsLeft / totalDots) : 0;
+      const baseFreq = 160 + progress * 95;
+      const freq = baseFreq + Math.sin(anim * (6 + progress * 6)) * 25;
+      sirenOsc.frequency.setValueAtTime(freq, t0);
+      sirenGain.gain.setValueAtTime(0.025, t0);
+    }
+  }
+
   function beep(kind){
     try{
       ensureAudio();
@@ -243,50 +311,109 @@
         o.start(t0); o.stop(t0 + dur + 0.03);
       }
       if (kind === 'dot'){
-        if (t0 - lastDotBeep < 0.11) return;      // limite le "waka waka"
+        if (t0 - lastDotBeep < 0.08) return;
         lastDotBeep = t0;
-        tone('square', 480, 300, 0.08, 0.045);
+        dotToneAlt = !dotToneAlt;
+        tone('square', dotToneAlt ? 460 : 330, dotToneAlt ? 320 : 220, 0.06, 0.045);
       } else if (kind === 'power'){
-        tone('square', 250, 700, 0.3, 0.07);
-        tone('square', 140, 360, 0.3, 0.06);
+        tone('square', 240, 750, 0.28, 0.08);
+        tone('square', 140, 380, 0.28, 0.07);
       } else if (kind === 'eatghost'){
-        tone('sawtooth', 760, 180, 0.32, 0.09);
+        tone('sawtooth', 780, 180, 0.32, 0.1);
       } else if (kind === 'death'){
-        tone('sine', 320, 35, 0.7, 0.12);
+        playDeathCascade();
       } else if (kind === 'fruit'){
-        tone('triangle', 800, 1300, 0.16, 0.08);
+        tone('triangle', 850, 1400, 0.16, 0.09);
       } else if (kind === 'fruitspawn'){
-        tone('triangle', 500, 800, 0.12, 0.06);
+        tone('triangle', 520, 820, 0.12, 0.06);
       } else if (kind === 'level'){
-        tone('square', 380, 780, 0.22, 0.07);
+        tone('square', 400, 800, 0.24, 0.08);
+      } else if (kind === 'extralife'){
+        playExtraLifeSound();
+      } else if (kind === 'revive'){
+        tone('triangle', 300, 600, 0.15, 0.06);
       } else if (kind === 'over'){
-        tone('sawtooth', 200, 55, 0.55, 0.1);
+        tone('sawtooth', 220, 50, 0.6, 0.1);
       }
     }catch(e){}
   }
 
+  function playIntroJingle(){
+    if (!actx) return;
+    const t0 = actx.currentTime;
+    const notes = [
+      {f:261.6, d:0.11}, {f:523.2, d:0.11}, {f:392.0, d:0.11}, {f:329.6, d:0.11},
+      {f:523.2, d:0.11}, {f:392.0, d:0.16}
+    ];
+    let cur = t0;
+    notes.forEach(n => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'square';
+      o.frequency.setValueAtTime(n.f, cur);
+      g.gain.setValueAtTime(0.05, cur);
+      g.gain.exponentialRampToValueAtTime(0.0001, cur + n.d);
+      o.connect(g); g.connect(actx.destination);
+      o.start(cur); o.stop(cur + n.d + 0.02);
+      cur += n.d;
+    });
+  }
+
+  function playDeathCascade(){
+    if (!actx) return;
+    const t0 = actx.currentTime;
+    const freqs = [620, 580, 540, 500, 460, 420, 380, 340, 300, 260, 220, 180, 140];
+    freqs.forEach((f, i) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'triangle';
+      const st = t0 + i * 0.085;
+      o.frequency.setValueAtTime(f, st);
+      o.frequency.exponentialRampToValueAtTime(f * 0.85, st + 0.075);
+      g.gain.setValueAtTime(0.09, st);
+      g.gain.exponentialRampToValueAtTime(0.0001, st + 0.075);
+      o.connect(g); g.connect(actx.destination);
+      o.start(st); o.stop(st + 0.08);
+    });
+  }
+
+  function playExtraLifeSound(){
+    if (!actx) return;
+    const t0 = actx.currentTime;
+    const notes = [392, 523, 659, 784, 1046];
+    notes.forEach((f, i) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'triangle';
+      const st = t0 + i * 0.07;
+      o.frequency.setValueAtTime(f, st);
+      g.gain.setValueAtTime(0.09, st);
+      g.gain.exponentialRampToValueAtTime(0.0001, st + 0.1);
+      o.connect(g); g.connect(actx.destination);
+      o.start(st); o.stop(st + 0.11);
+    });
+  }
+
   // ---------- Construction d'un niveau ----------
   function buildLevel(){
-    for (let y = 0; y < ROWS; y++)
+    dotsLeft = 0;
+    for (let y = 0; y < ROWS; y++){
       for (let x = 0; x < COLS; x++){
         dots[y][x] = MAZE[y][x] === '.';
         powers[y][x] = MAZE[y][x] === 'o';
-      }
-    dotsLeft = 0;
-    for (let y = 0; y < ROWS; y++)
-      for (let x = 0; x < COLS; x++)
         if (dots[y][x] || powers[y][x]) dotsLeft++;
+      }
+    }
+    totalDots = dotsLeft;
     dotEaten = 0;
   }
 
   function resetGhosts(){
     ghosts = GHOST_DEFS.map(function(d, i){
-      const active = d.delay === 0;                 // Blinky démarre dehors
+      const active = d.delay === 0;
       return {
         name: d.name, color: d.color, scatter: d.scatter, phase: i * 1.7,
         cell: {x:d.start.x, y:d.start.y},
         from: {x:d.start.x, y:d.start.y},
         to: {x:d.start.x, y:d.start.y + (active ? -1 : 0)},
+        start: {x:d.start.x, y:d.start.y},
         dir: {x:0, y:-1},
         prog: 0,
         mode: active ? (phase ? 'chase' : 'scatter') : 'house',
@@ -311,16 +438,18 @@
   function start(){
     ensureAudio();
     score = 0; lives = 3; level = 1;
+    nextExtraLife = 10000;
     buildLevel();
     resetPositions();
-    deathAnim = 0;
+    deathAnim = 0; clearTimer = 0;
     state = 'play'; paused = false;
     bannerText = 'NIVEAU 1'; bannerTimer = 2;
     hud.classList.remove('hidden');
     overlay.classList.add('hidden');
     over2.classList.add('hidden');
     pauseTag.classList.remove('on');
-    beep('level');
+    pauseBtn.textContent = '⏸';
+    playIntroJingle();
   }
 
   function gameOver(){
@@ -334,7 +463,13 @@
     over2.classList.remove('hidden');
   }
 
-  function levelClear(){
+  function triggerLevelClear(){
+    clearTimer = 1.6;
+    beep('level');
+  }
+
+  function proceedNextLevel(){
+    clearTimer = 0;
     level++;
     buildLevel();
     resetPositions();
@@ -343,114 +478,184 @@
     beep('level');
   }
 
-  // ---------- Déplacement de Pac-Man ----------
+  function checkExtraLife(){
+    if (score >= nextExtraLife){
+      lives++;
+      nextExtraLife += 10000;
+      beep('extralife');
+      addFloater(pac.x, pac.y - 0.6, '1UP ! +1 VIE');
+    }
+  }
+
+  // ---------- Déplacement de Pac-Man (Cornering souple & demi-tour direct) ----------
   function tryTurn(){
     const w = pac.want;
+    if (w.x === 0 && w.y === 0) return;
     if (w.x === pac.dir.x && w.y === pac.dir.y) return;
-    const cx = Math.floor(pac.x), cy = Math.floor(pac.y);
-    // Il faut être aligné sur le centre dans l'axe perpendiculaire
-    if (w.x !== 0){
-      if (Math.abs(pac.y - (cy + 0.5)) > 0.1) return;
-    } else {
-      if (Math.abs(pac.x - (cx + 0.5)) > 0.1) return;
+
+    // 1. Demi-tour instantané sur le même rail
+    if (w.x === -pac.dir.x && w.y === -pac.dir.y){
+      pac.dir = {x: w.x, y: w.y};
+      return;
     }
-    if (isPacWall(cx + w.x, cy + w.y)) return;
-    pac.dir = {x:w.x, y:w.y};
-    if (w.x !== 0) pac.y = cy + 0.5; else pac.x = cx + 0.5;
+
+    // 2. Virage perpendiculaire avec pré-virage (cornering)
+    const cx = Math.floor(pac.x), cy = Math.floor(pac.y);
+    const centerX = cx + 0.5, centerY = cy + 0.5;
+
+    if (w.x !== 0){
+      // Déplacement horizontal souhaité depuis un axe vertical
+      if (Math.abs(pac.y - centerY) <= 0.38){
+        if (!isPacWall(cx + w.x, cy)){
+          pac.dir = {x: w.x, y: 0};
+          pac.y = centerY; // Snap sur le rail
+        }
+      }
+    } else if (w.y !== 0){
+      // Déplacement vertical souhaité depuis un axe horizontal
+      if (Math.abs(pac.x - centerX) <= 0.38){
+        if (!isPacWall(cx, cy + w.y)){
+          pac.dir = {x: 0, y: w.y};
+          pac.x = centerX; // Snap sur le rail
+        }
+      }
+    }
   }
 
   function movePac(dt){
+    if (pac.dir.x === 0 && pac.dir.y === 0) return;
     const step = PAC_SPEED * speedMult() * dt;
+
     if (pac.dir.x !== 0){
       const row = Math.floor(pac.y);
-      const col = Math.floor(pac.x);
-      const nextCol = pac.dir.x > 0 ? col + 1 : col - 1;
-      if (nextCol < 0 || nextCol >= COLS){
-        // Tunnel : on traverse le bord et on réapparaît de l'autre côté
-        const farCol = nextCol < 0 ? COLS - 1 : 0;
-        if (!isPacWall(farCol, row)){
-          pac.x += pac.dir.x * step;
-          if (pac.x < 0) pac.x += COLS;
-          if (pac.x >= COLS) pac.x -= COLS;
+      const nextX = pac.x + pac.dir.x * step;
+      const curCol = Math.floor(pac.x);
+
+      // Tunnel en ligne 7 : traversée d'un bord à l'autre
+      if (row === 7){
+        pac.x = nextX;
+        if (pac.x < -0.5) pac.x += COLS;
+        if (pac.x >= COLS + 0.5) pac.x -= COLS;
+        return;
+      }
+
+      if (pac.dir.x > 0){
+        const nextCol = Math.floor(nextX + 0.45);
+        if (isPacWall(nextCol, row)){
+          pac.x = curCol + 0.5;
+          pac.dir = {x:0, y:0};
         } else {
-          // pas d'ouverture de l'autre côté : on s'arrête au bord
-          const bound = pac.dir.x > 0 ? col + 1 : col;
-          pac.x = pac.dir.x > 0 ? Math.min(pac.x + step, bound - 0.05) : Math.max(pac.x - step, bound + 0.05);
+          pac.x = nextX;
         }
-      } else if (isPacWall(nextCol, row)){
-        const bound = pac.dir.x > 0 ? col + 1 : col;
-        pac.x = pac.dir.x > 0 ? Math.min(pac.x + step, bound - 0.05) : Math.max(pac.x - step, bound + 0.05);
       } else {
-        pac.x += pac.dir.x * step;
+        const nextCol = Math.floor(nextX - 0.45);
+        if (isPacWall(nextCol, row)){
+          pac.x = curCol + 0.5;
+          pac.dir = {x:0, y:0};
+        } else {
+          pac.x = nextX;
+        }
       }
     } else {
       const col = Math.floor(pac.x);
-      const row = Math.floor(pac.y);
-      const nextRow = pac.dir.y > 0 ? row + 1 : row - 1;
-      if (isPacWall(col, nextRow)){
-        const bound = pac.dir.y > 0 ? row + 1 : row;
-        pac.y = pac.dir.y > 0 ? Math.min(pac.y + step, bound - 0.05) : Math.max(pac.y - step, bound + 0.05);
+      const nextY = pac.y + pac.dir.y * step;
+      const curRow = Math.floor(pac.y);
+
+      if (pac.dir.y > 0){
+        const nextRow = Math.floor(nextY + 0.45);
+        if (isPacWall(col, nextRow)){
+          pac.y = curRow + 0.5;
+          pac.dir = {x:0, y:0};
+        } else {
+          pac.y = nextY;
+        }
       } else {
-        pac.y += pac.dir.y * step;
+        const nextRow = Math.floor(nextY - 0.45);
+        if (isPacWall(col, nextRow)){
+          pac.y = curRow + 0.5;
+          pac.dir = {x:0, y:0};
+        } else {
+          pac.y = nextY;
+        }
       }
     }
-    // passage de bord (tunnel)
-    if (pac.x < 0) pac.x += COLS;
-    if (pac.x >= COLS) pac.x -= COLS;
   }
 
   function eatCellItems(){
     const col = Math.floor(pac.x), row = Math.floor(pac.y);
-    if (dots[row][col]){
-      dots[row][col] = false;
-      score += 10; dotsLeft--; dotEaten++;
-      beep('dot');
-      checkFruit();
-    } else if (powers[row][col]){
-      powers[row][col] = false;
-      score += 50; dotsLeft--; dotEaten++;
-      activatePower();
+    if (col >= 0 && col < COLS && row >= 0 && row < ROWS){
+      if (dots[row][col]){
+        dots[row][col] = false;
+        score += 10; dotsLeft--; dotEaten++;
+        checkExtraLife();
+        beep('dot');
+        checkFruit();
+      } else if (powers[row][col]){
+        powers[row][col] = false;
+        score += 50; dotsLeft--; dotEaten++;
+        checkExtraLife();
+        activatePower();
+      }
     }
-    // fruit bonus
+    // Fruit bonus
     if (fruit){
       const dx = pac.x - (fruit.x + 0.5), dy = pac.y - (fruit.y + 0.5);
       if (dx * dx + dy * dy < 0.45){
         score += fruit.val;
+        checkExtraLife();
         addFloater(fruit.x + 0.5, fruit.y, '+' + fruit.val);
         fruit = null;
         beep('fruit');
       }
     }
-    if (dotsLeft <= 0) levelClear();
+    if (dotsLeft <= 0 && clearTimer <= 0) triggerLevelClear();
   }
 
+  function currentFruitIdx(){
+    return Math.min(level - 1, FRUIT_INFO.length - 1);
+  }
   function fruitValue(){
-    const table = [100, 300, 500, 700, 1000, 2000, 3000];
-    return table[Math.min(level - 1, table.length - 1)];
+    return FRUIT_INFO[currentFruitIdx()].val;
   }
   function checkFruit(){
     if (!fruit && (dotEaten === 70 || dotEaten === 170)){
-      fruit = {x:FRUIT_POS.x, y:FRUIT_POS.y, val:fruitValue()};
-      fruitTimer = 9;
+      fruit = {x:FRUIT_POS.x, y:FRUIT_POS.y, val:fruitValue(), idx:currentFruitIdx()};
+      fruitTimer = 9.5;
       beep('fruitspawn');
     }
   }
 
-  // ---------- Fantômes ----------
+  // ---------- Fantômes & IA ----------
   function ghostSpeed(g){
-    if (g.mode === 'frightened') return FRIGHT_SPEED;
     if (g.mode === 'eaten') return EYE_SPEED;
+    if (g.mode === 'frightened') return FRIGHT_SPEED;
+    // Ralentissement stratégique dans le tunnel latéral
+    if (g.cell.y === 7 && (g.cell.x <= 3 || g.cell.x >= 15)) return GHOST_SPEED * 0.55;
+    // Cruise Elroy pour Blinky en fin de niveau
+    if (g.name === 'Blinky'){
+      if (dotsLeft <= 10) return GHOST_SPEED * 1.15;
+      if (dotsLeft <= 25) return GHOST_SPEED * 1.08;
+    }
     return GHOST_SPEED;
   }
 
   function ghostTarget(g){
-    if (g.mode === 'eaten') return {x: DOOR.x, y: DOOR.y};
+    if (g.mode === 'eaten') return {x: DOOR.x, y: DOOR.y - 1};
     if (g.mode === 'scatter') return g.scatter;
     const pc = {x: Math.floor(pac.x), y: Math.floor(pac.y)};
     if (g.name === 'Blinky') return pc;
     if (g.name === 'Pinky')  return {x: pc.x + pac.dir.x * 4, y: pc.y + pac.dir.y * 4};
-    if (g.name === 'Inky')   return {x: pc.x + pac.dir.x * 2, y: pc.y + pac.dir.y * 2};
-    // Clyde : timide, fonce seulement s'il est loin
+    if (g.name === 'Inky'){
+      // Cible Inky authentique : pivot à 2 cases devant Pac-Man, vecteur doublé depuis Blinky
+      const blinky = ghosts.find(gh => gh.name === 'Blinky') || {cell:{x:9, y:8}};
+      const pivX = pc.x + pac.dir.x * 2;
+      const pivY = pc.y + pac.dir.y * 2;
+      return {
+        x: pivX + (pivX - blinky.cell.x),
+        y: pivY + (pivY - blinky.cell.y)
+      };
+    }
+    // Clyde : fonce s'il est loin, fuit dans son coin s'il est à moins de 8 cases
     const d = Math.hypot(pac.x - g.cell.x, pac.y - g.cell.y);
     return d > 8 ? pc : g.scatter;
   }
@@ -460,12 +665,13 @@
     const opts = [];
     const dirs = [{x:0,y:-1},{x:0,y:1},{x:-1,y:0},{x:1,y:0}];
     for (const d of dirs){
-      if (d.x === -g.dir.x && d.y === -g.dir.y) continue;   // pas de demi-tour
+      if (d.x === -g.dir.x && d.y === -g.dir.y) continue; // Pas de demi-tour en carrefour
       if (!isGhostPassable(cx + d.x, cy + d.y, g)) continue;
       opts.push(d);
     }
-    if (!opts.length) opts.push({x:-g.dir.x, y:-g.dir.y});  // impasse : demi-tour forcé
+    if (!opts.length) opts.push({x:-g.dir.x, y:-g.dir.y}); // Impasse : demi-tour forcé
     if (g.mode === 'frightened') return opts[(Math.random() * opts.length) | 0];
+
     const t = ghostTarget(g);
     let best = opts[0], bestD = Infinity;
     for (const d of opts){
@@ -476,9 +682,9 @@
   }
 
   function reverseGhost(g){
-    if (g.mode === 'house' || g.mode === 'leaving') return;
+    if (g.mode === 'house' || g.mode === 'leaving' || g.mode === 'entering' || g.mode === 'eaten') return;
     const tmp = g.from; g.from = g.to; g.to = tmp;
-    g.prog = 1 - g.prog;
+    g.prog = Math.max(0, Math.min(1, 1 - g.prog));
     g.dir = {x:-g.dir.x, y:-g.dir.y};
     g.cell = {x:g.from.x, y:g.from.y};
   }
@@ -487,54 +693,78 @@
     if (g.mode === 'house'){
       g.houseTimer -= dt;
       if (g.houseTimer <= 0){
-        // sortie par la porte
+        // Sortie fluide et animée de la maison des fantômes
         g.mode = 'leaving';
-        g.cell = {x:DOOR.x, y:DOOR.y};
-        g.from = {x:DOOR.x, y:DOOR.y};
-        g.to = {x:DOOR.x, y:DOOR.y - 1};
-        g.dir = {x:0, y:-1};
+        g.from = {x: 9, y: 10};
+        g.to = {x: 9, y: 8};
+        g.cell = {x: 9, y: 8};
         g.prog = 0;
+        g.dir = {x: 0, y: -1};
       }
       return;
     }
     if (g.mode === 'leaving'){
-      g.prog += ghostSpeed(g) * speedMult() * dt;
+      g.prog += ghostSpeed(g) * speedMult() * dt * 0.75;
       if (g.prog >= 1){
-        g.cell = {x:g.to.x, y:g.to.y};
+        g.cell = {x: 9, y: 8};
+        g.from = {x: 9, y: 8};
         g.prog = 0;
-        g.mode = powerTimer > 0 ? 'frightened' : 'chase';
-        g.from = {x:g.cell.x, y:g.cell.y};
-        g.to = {x:g.cell.x, y:g.cell.y - 1};
-        g.dir = {x:0, y:-1};
+        g.mode = powerTimer > 0 ? 'frightened' : (phase ? 'chase' : 'scatter');
+        const d = ghostDecide(g);
+        g.dir = d;
+        g.to = {x: g.cell.x + d.x, y: g.cell.y + d.y};
       }
       return;
     }
+    if (g.mode === 'entering'){
+      g.prog += EYE_SPEED * speedMult() * dt * 0.75;
+      if (g.prog >= 1){
+        g.mode = 'house';
+        g.houseTimer = 1.0;
+        g.cell = {x: g.start.x, y: g.start.y};
+        beep('revive');
+      }
+      return;
+    }
+
     g.prog += ghostSpeed(g) * speedMult() * dt;
     if (g.prog >= 1){
       g.prog -= 1;
-      g.cell = {x:g.to.x, y:g.to.y};
-      // les yeux rentrent dans le repaire
-      if (g.mode === 'eaten' && g.cell.x === DOOR.x && g.cell.y === DOOR.y){
-        g.mode = 'house';
-        g.houseTimer = 1.2;
-        g.cell = {x:HOUSE.x, y:HOUSE.y};
+      let cx = g.to.x, cy = g.to.y;
+
+      // Wrap-around du tunnel latéral pour les fantômes
+      if (cy === 7){
+        if (cx < 0) { cx = COLS - 1; g.from.x = COLS; }
+        else if (cx >= COLS) { cx = 0; g.from.x = -1; }
+      }
+      g.cell = {x: cx, y: cy};
+
+      // Si les yeux mangés atteignent l'entrée (9, 8), descente dans le repaire
+      if (g.mode === 'eaten' && g.cell.x === DOOR.x && g.cell.y === DOOR.y - 1){
+        g.mode = 'entering';
+        g.from = {x: DOOR.x, y: DOOR.y - 1};
+        g.to = {x: g.start.x, y: g.start.y};
+        g.prog = 0;
+        g.dir = {x: 0, y: 1};
         return;
       }
+
       const d = ghostDecide(g);
       g.dir = d;
-      g.from = {x:g.cell.x, y:g.cell.y};
-      g.to = {x:g.cell.x + d.x, y:g.cell.y + d.y};
+      g.from = {x: g.cell.x, y: g.cell.y};
+      g.to = {x: g.cell.x + d.x, y: g.cell.y + d.y};
     }
   }
 
   function ghostPos(g){
     if (g.mode === 'house'){
-      return {x: g.cell.x + 0.5, y: HOUSE.y + 0.5 + Math.sin(anim * 3 + g.phase) * 0.22};
+      return {x: g.start.x + 0.5, y: HOUSE.y + 0.5 + Math.sin(anim * 3.5 + g.phase) * 0.22};
     }
-    return {
-      x: g.from.x + (g.to.x - g.from.x) * g.prog + 0.5,
-      y: g.from.y + (g.to.y - g.from.y) * g.prog + 0.5
-    };
+    let gx = g.from.x + (g.to.x - g.from.x) * g.prog + 0.5;
+    let gy = g.from.y + (g.to.y - g.from.y) * g.prog + 0.5;
+    if (gx < -0.5) gx += COLS;
+    if (gx >= COLS + 0.5) gx -= COLS;
+    return {x: gx, y: gy};
   }
 
   // ---------- Interactions ----------
@@ -551,18 +781,16 @@
   }
 
   function checkCollisions(){
-    // Détection par case (comme le Pac-Man original) : on compare les cellules
-    // occupées. Avec une distance de centre, Pac-Man collé à un mur (centre à
-    // ~0,45 case du centre) pouvait laisser passer un fantôme dans la même case.
     const px = Math.floor(pac.x), py = Math.floor(pac.y);
     for (const g of ghosts){
-      if (g.mode === 'house' || g.mode === 'eaten') continue;
+      if (g.mode === 'house' || g.mode === 'leaving' || g.mode === 'entering' || g.mode === 'eaten') continue;
       const p = ghostPos(g);
       if (Math.floor(p.x) === px && Math.floor(p.y) === py){
         if (g.mode === 'frightened'){
           const pts = 200 * Math.pow(2, ghostCombo);
           ghostCombo++;
           score += pts;
+          checkExtraLife();
           g.mode = 'eaten';
           reverseGhost(g);
           addFloater(p.x, p.y, '+' + pts);
@@ -582,13 +810,19 @@
   function die(){
     if (deathAnim > 0) return;
     lives--;
-    deathAnim = 1.4;
+    deathAnim = 1.6;
     beep('death');
   }
 
   // ---------- Mise à jour ----------
   function update(dt){
-    // bascule scatter / chasse
+    if (clearTimer > 0){
+      clearTimer -= dt;
+      if (clearTimer <= 0) proceedNextLevel();
+      return;
+    }
+
+    // Bascule scatter / chase
     modeTimer -= dt;
     if (modeTimer <= 0){
       modeTimer = phase ? 7 : 4;
@@ -600,7 +834,8 @@
         }
       }
     }
-    // fin de la vulnérabilité
+
+    // Fin de vulnérabilité
     if (powerTimer > 0){
       powerTimer -= dt;
       if (powerTimer <= 0){
@@ -610,7 +845,8 @@
         }
       }
     }
-    // fruit
+
+    // Fruit
     if (fruit){
       fruitTimer -= dt;
       if (fruitTimer <= 0) fruit = null;
@@ -622,18 +858,20 @@
     eatCellItems();
     for (const g of ghosts) updateGhost(g, dt);
     checkCollisions();
+
     for (let i = floaters.length - 1; i >= 0; i--){
       floaters[i].t += dt;
       if (floaters[i].t > 1) floaters.splice(i, 1);
     }
   }
 
-  let lastTime = 0;
+  let lastTime = performance.now();
   function loop(now){
     requestAnimationFrame(loop);
     const dt = Math.min(50, now - lastTime);
     lastTime = now;
     anim += dt / 1000;
+
     if (state === 'play' && !paused){
       if (deathAnim > 0){
         deathAnim -= dt / 1000;
@@ -646,6 +884,7 @@
         update(dt / 1000);
       }
     }
+    updateSiren();
     updateHud();
     draw();
   }
@@ -654,16 +893,23 @@
     scoreEl.textContent = score;
     highEl.textContent = hi;
     levelEl.textContent = level;
-    livesIcons.textContent = '●'.repeat(Math.max(0, lives));
+    // Rendu d'icônes stylisées Pac-Man
+    let iconsHtml = '';
+    for (let i = 0; i < Math.max(0, lives); i++){
+      iconsHtml += '<svg width="18" height="18" viewBox="0 0 20 20" style="margin-left:3px;"><path d="M10 10 L3 4 A9 9 1 1 0 3 16 Z" fill="#ffd83d"/></svg>';
+    }
+    livesIcons.innerHTML = iconsHtml;
   }
 
-  // ---------- Saisie ----------
+  // ---------- Saisie & Contrôles ----------
   function togglePause(){
-    if (state !== 'play' || deathAnim > 0) return;
+    if (state !== 'play' || deathAnim > 0 || clearTimer > 0) return;
     paused = !paused;
     pauseTag.classList.toggle('on', paused);
+    pauseBtn.textContent = paused ? '▶' : '⏸';
   }
   function setWant(dx, dy){ pac.want = {x:dx, y:dy}; }
+
   function onKey(e){
     const k = e.key;
     let dx = 0, dy = 0;
@@ -687,40 +933,50 @@
   }
   document.addEventListener('keydown', onKey);
 
-  // ---------- Tactile (glisser pour choisir la direction) ----------
+  // ---------- Tactile continu (touchmove réactif sans attendre touchend) ----------
   let touchStartXY = null;
   canvas.addEventListener('touchstart', function(e){
-    e.preventDefault();
     const t = e.changedTouches[0];
-    touchStartXY = {x:t.clientX, y:t.clientY};
-  }, {passive:false});
+    touchStartXY = {x: t.clientX, y: t.clientY};
+    ensureAudio();
+  }, {passive:true});
+
+  canvas.addEventListener('touchmove', function(e){
+    if (!touchStartXY) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStartXY.x;
+    const dy = t.clientY - touchStartXY.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist >= 18){
+      if (state !== 'play'){
+        start();
+        touchStartXY = null;
+        return;
+      }
+      if (Math.abs(dx) > Math.abs(dy)) setWant(Math.sign(dx), 0);
+      else setWant(0, Math.sign(dy));
+      // Réinitialisation du point d'ancrage pour glisser sans lever le doigt
+      touchStartXY = {x: t.clientX, y: t.clientY};
+    }
+  }, {passive:true});
+
   canvas.addEventListener('touchend', function(e){
     if (!touchStartXY) return;
-    e.preventDefault();
     const t = e.changedTouches[0];
     const dx = t.clientX - touchStartXY.x, dy = t.clientY - touchStartXY.y;
     touchStartXY = null;
-    if (Math.abs(dx) < 24 && Math.abs(dy) < 24) return;   // simple tap ignoré
-    if (state !== 'play'){ start(); return; }
-    if (Math.abs(dx) > Math.abs(dy)) setWant(Math.sign(dx), 0);
-    else setWant(0, Math.sign(dy));
-  }, {passive:false});
+    if (Math.hypot(dx, dy) >= 12 && state === 'play'){
+      if (Math.abs(dx) > Math.abs(dy)) setWant(Math.sign(dx), 0);
+      else setWant(0, Math.sign(dy));
+    }
+  }, {passive:true});
 
+  pauseBtn.addEventListener('click', togglePause);
   startBtn.addEventListener('click', function(){ ensureAudio(); start(); });
   restartBtn.addEventListener('click', function(){ ensureAudio(); start(); });
   document.addEventListener('pointerdown', ensureAudio, {once:true});
 
-  // ---------- Dessin ----------
-  function roundRect(x, y, w, h, r){
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-  }
-
+  // ---------- Dessin Canvas ----------
   function draw(){
     ctx.setTransform(dpr * sc, 0, 0, dpr * sc, dpr * ox, dpr * oy);
     ctx.fillStyle = '#02070f';
@@ -735,42 +991,71 @@
   }
 
   function drawMaze(){
-    // halo d'ambiance
-    const halo = ctx.createRadialGradient(W/2, H/2, W*0.1, W/2, H/2, W*0.7);
-    halo.addColorStop(0, 'rgba(30,90,180,0.14)');
-    halo.addColorStop(1, 'rgba(2,7,15,0)');
+    // Halo d'ambiance néon
+    const halo = ctx.createRadialGradient(W/2, H/2, W*0.1, W/2, H/2, W*0.75);
+    halo.addColorStop(0, 'rgba(20, 65, 150, 0.16)');
+    halo.addColorStop(1, 'rgba(2, 7, 15, 0)');
     ctx.fillStyle = halo;
     ctx.fillRect(0, 0, W, H);
+
+    const isFlash = clearTimer > 0 && Math.floor(clearTimer * 8) % 2 === 0;
+    const wallNeon = isFlash ? '#ffffff' : '#1e78ff';
+    const wallGlow = isFlash ? '#ffffff' : '#00e5ff';
+    const wallFill = isFlash ? 'rgba(255,255,255,0.25)' : '#071630';
 
     for (let y = 0; y < ROWS; y++){
       for (let x = 0; x < COLS; x++){
         const c = MAZE[y][x];
-        const px = x * CELL, py = y * CELL, cx = px + CELL/2, cy = py + CELL/2;
+        const px = x * CELL, py = y * CELL;
+        const cx = px + CELL/2, cy = py + CELL/2;
+
         if (c === '#'){
-          const g = ctx.createLinearGradient(px, py, px + CELL, py + CELL);
-          g.addColorStop(0, '#1c4f94');
-          g.addColorStop(1, '#0d2a54');
-          ctx.fillStyle = g;
-          roundRect(px + 1, py + 1, CELL - 2, CELL - 2, 5);
-          ctx.fill();
-          ctx.strokeStyle = 'rgba(90,175,255,0.30)';
-          ctx.lineWidth = 1;
-          roundRect(px + 1, py + 1, CELL - 2, CELL - 2, 5);
-          ctx.stroke();
-        } else if (dots[y][x]){
-          ctx.fillStyle = '#ffd7e8';
+          // Remplissage sombre du bloc
+          ctx.fillStyle = wallFill;
+          ctx.fillRect(px, py, CELL, CELL);
+
+          // Lignes néon tubulaires sur les faces mitoyennes
+          ctx.strokeStyle = wallNeon;
+          ctx.shadowColor = wallGlow;
+          ctx.shadowBlur = isFlash ? 14 : 7;
+          ctx.lineWidth = 2.5;
+          ctx.lineCap = 'round';
+
+          const u = (y > 0 && MAZE[y-1][x] === '#');
+          const d = (y < ROWS-1 && MAZE[y+1][x] === '#');
+          const l = (x > 0 && MAZE[y][x-1] === '#');
+          const r = (x < COLS-1 && MAZE[y][x+1] === '#');
+
           ctx.beginPath();
-          ctx.arc(cx, cy, CELL * 0.09, 0, TAU);
+          if (!u) { ctx.moveTo(px + 1.5, py + 1.5); ctx.lineTo(px + CELL - 1.5, py + 1.5); }
+          if (!d) { ctx.moveTo(px + 1.5, py + CELL - 1.5); ctx.lineTo(px + CELL - 1.5, py + CELL - 1.5); }
+          if (!l) { ctx.moveTo(px + 1.5, py + 1.5); ctx.lineTo(px + 1.5, py + CELL - 1.5); }
+          if (!r) { ctx.moveTo(px + CELL - 1.5, py + 1.5); ctx.lineTo(px + CELL - 1.5, py + CELL - 1.5); }
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        } else if (dots[y][x]){
+          ctx.fillStyle = '#ffdfba';
+          ctx.shadowColor = '#ffb300';
+          ctx.shadowBlur = 4;
+          ctx.beginPath();
+          ctx.arc(cx, cy, CELL * 0.1, 0, TAU);
           ctx.fill();
+          ctx.shadowBlur = 0;
         } else if (powers[y][x]){
-          const blink = 0.55 + 0.45 * Math.sin(anim * 6);
-          if (blink > 0.2){
+          const blink = 0.55 + 0.45 * Math.sin(anim * 7);
+          if (blink > 0.18){
             const r = CELL * 0.28 * blink;
             const g = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r);
-            g.addColorStop(0, '#fff3b0');
-            g.addColorStop(1, '#ffc400');
+            g.addColorStop(0, '#ffffff');
+            g.addColorStop(0.4, '#fff275');
+            g.addColorStop(1, '#ff9800');
             ctx.fillStyle = g;
-            ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.fill();
+            ctx.shadowColor = '#ffc107';
+            ctx.shadowBlur = 14;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, TAU);
+            ctx.fill();
+            ctx.shadowBlur = 0;
           }
         }
       }
@@ -783,14 +1068,16 @@
     ctx.fillStyle = '#ff9ad5';
     ctx.shadowColor = '#ff9ad5';
     ctx.shadowBlur = 8;
-    ctx.fillRect(px + CELL*0.15, py + CELL*0.38, CELL*0.7, CELL*0.22);
+    ctx.fillRect(px + CELL*0.12, py + CELL*0.4, CELL*0.76, CELL*0.2);
     ctx.shadowBlur = 0;
   }
 
   function drawPac(){
     const r = CELL * 0.42;
     const cx = pac.x * CELL, cy = pac.y * CELL;
-    const m = 0.16 + 0.42 * (0.5 + 0.5 * Math.sin(anim * 11));   // ouverture de la bouche
+    // Pac-Man s'arrête de mâcher s'il est immobile
+    const isMoving = pac.dir.x !== 0 || pac.dir.y !== 0;
+    const m = isMoving ? 0.16 + 0.44 * (0.5 + 0.5 * Math.sin(anim * 14)) : 0.25;
     const a = Math.atan2(pac.dir.y, pac.dir.x);
     const g = ctx.createRadialGradient(cx - r*0.35, cy - r*0.35, r*0.1, cx, cy, r);
     g.addColorStop(0, '#fff3a0');
@@ -800,37 +1087,70 @@
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.arc(cx, cy, r, a + m, a - m + TAU);
+    ctx.lineTo(cx, cy);
     ctx.closePath();
     ctx.fill();
     ctx.shadowBlur = 0;
   }
 
   function drawPacDeath(){
-    const t = Math.min(1, (1.4 - deathAnim) / 1.4);
-    const r = CELL * 0.42 * Math.max(0.05, 1 - t);
+    const t = Math.min(1, (1.6 - deathAnim) / 1.6);
     const cx = pac.x * CELL, cy = pac.y * CELL;
-    ctx.fillStyle = '#ffc400';
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.fill();
+    const r = CELL * 0.42;
+
+    if (t < 0.75){
+      // Fermeture complète vers le haut à 360°
+      const frac = t / 0.75;
+      const mouth = frac * Math.PI;
+      const up = -Math.PI / 2;
+      ctx.fillStyle = '#ffc400';
+      ctx.shadowColor = '#ffb300';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, up + mouth, up - mouth + TAU, false);
+      ctx.lineTo(cx, cy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    } else {
+      // Étoile d'étincelles dorées
+      const burstFrac = (t - 0.75) / 0.25;
+      const burstR = r * (0.3 + burstFrac * 1.6);
+      const alpha = Math.max(0, 1 - burstFrac);
+      ctx.fillStyle = `rgba(255, 215, 0, ${alpha})`;
+      for (let i = 0; i < 8; i++){
+        const angle = (i / 8) * TAU;
+        const px = cx + Math.cos(angle) * burstR;
+        const py = cy + Math.sin(angle) * burstR;
+        ctx.beginPath();
+        ctx.arc(px, py, 2.5, 0, TAU);
+        ctx.fill();
+      }
+    }
   }
 
   function drawGhost(g){
     const p = ghostPos(g);
     const cx = p.x * CELL, cy = p.y * CELL;
     const r = CELL * 0.44;
+
     if (g.mode === 'eaten'){
-      drawEyes(cx, cy, g.dir, r * 0.6);   // seuls les yeux reviennent
+      drawEyes(cx, cy, g.dir, r * 0.65);
       return;
     }
+
     const fright = g.mode === 'frightened';
     let color = g.color;
     if (fright){
       const flash = powerTimer < 2 && Math.floor(anim * 8) % 2 === 0;
-      color = flash ? '#dfe3ff' : '#3b4bd8';
+      color = flash ? '#dfe3ff' : '#2b3dd8';
     }
+
     ctx.fillStyle = color;
     ctx.shadowColor = color;
     ctx.shadowBlur = 12;
-    // dôme + bas ondulé
+
+    // Tête en dôme + jupe ondulante animée
     ctx.beginPath();
     ctx.arc(cx, cy - r * 0.18, r, Math.PI, 0);
     const base = cy + r * 0.7;
@@ -838,13 +1158,15 @@
     ctx.lineTo(cx + r, base);
     for (let i = wav; i >= 0; i--){
       const wx = cx - r + (i / wav) * 2 * r;
-      ctx.quadraticCurveTo(wx + r / wav * 0.6, base - r * 0.22, wx, base);
+      const waveOffset = Math.sin(anim * 14 + i * 2.2) * (CELL * 0.08);
+      ctx.quadraticCurveTo(wx + r / wav * 0.6, base - r * 0.24 + waveOffset, wx, base);
     }
     ctx.closePath();
     ctx.fill();
     ctx.shadowBlur = 0;
+
     if (fright){
-      // visage vulnérable
+      // Visage vulnérable (yeux et bouche en zig-zag)
       ctx.fillStyle = '#fff';
       ctx.beginPath(); ctx.arc(cx - r*0.28, cy - r*0.12, r*0.13, 0, TAU); ctx.fill();
       ctx.beginPath(); ctx.arc(cx + r*0.28, cy - r*0.12, r*0.13, 0, TAU); ctx.fill();
@@ -877,17 +1199,84 @@
   function drawFruit(f){
     const cx = (f.x + 0.5) * CELL, cy = (f.y + 0.5) * CELL;
     const s = CELL;
-    // tige
-    ctx.strokeStyle = '#2e7d32';
-    ctx.lineWidth = Math.max(1.5, s * 0.05);
-    ctx.beginPath(); ctx.moveTo(cx, cy + s*0.1); ctx.quadraticCurveTo(cx + s*0.05, cy - s*0.2, cx + s*0.22, cy - s*0.28); ctx.stroke();
-    // cerises
-    ctx.fillStyle = '#ff4f5e';
-    ctx.beginPath(); ctx.arc(cx - s*0.18, cy + s*0.12, s*0.18, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx + s*0.18, cy + s*0.12, s*0.18, 0, TAU); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.beginPath(); ctx.arc(cx - s*0.24, cy + s*0.06, s*0.05, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx + s*0.12, cy + s*0.06, s*0.05, 0, TAU); ctx.fill();
+    const idx = f.idx || 0;
+
+    ctx.save();
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = FRUIT_INFO[idx].color;
+
+    if (idx === 0){
+      // Cerises jumelées
+      ctx.strokeStyle = '#388e3c'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - s*0.14, cy);
+      ctx.quadraticCurveTo(cx, cy - s*0.28, cx + s*0.18, cy - s*0.3);
+      ctx.moveTo(cx + s*0.14, cy);
+      ctx.quadraticCurveTo(cx, cy - s*0.28, cx + s*0.18, cy - s*0.3);
+      ctx.stroke();
+      ctx.fillStyle = '#ff1744';
+      ctx.beginPath(); ctx.arc(cx - s*0.15, cy + s*0.08, s*0.17, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx + s*0.15, cy + s*0.08, s*0.17, 0, TAU); ctx.fill();
+    } else if (idx === 1){
+      // Fraise
+      ctx.fillStyle = '#ff1744';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + s*0.32);
+      ctx.bezierCurveTo(cx + s*0.35, cy, cx + s*0.25, cy - s*0.2, cx, cy - s*0.2);
+      ctx.bezierCurveTo(cx - s*0.25, cy - s*0.2, cx - s*0.35, cy, cx, cy + s*0.32);
+      ctx.fill();
+      ctx.fillStyle = '#4caf50';
+      ctx.fillRect(cx - s*0.15, cy - s*0.26, s*0.3, s*0.09);
+    } else if (idx === 2){
+      // Orange
+      ctx.fillStyle = '#ff9100';
+      ctx.beginPath(); ctx.arc(cx, cy + s*0.04, s*0.26, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#2e7d32';
+      ctx.beginPath(); ctx.ellipse(cx + s*0.08, cy - s*0.22, s*0.12, s*0.06, 0.5, 0, TAU); ctx.fill();
+    } else if (idx === 3){
+      // Pomme
+      ctx.fillStyle = '#d50000';
+      ctx.beginPath(); ctx.arc(cx - s*0.09, cy + s*0.04, s*0.21, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx + s*0.09, cy + s*0.04, s*0.21, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#5d4037'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx, cy - s*0.15); ctx.lineTo(cx + s*0.05, cy - s*0.3); ctx.stroke();
+    } else if (idx === 4){
+      // Melon
+      ctx.fillStyle = '#43a047';
+      ctx.beginPath(); ctx.arc(cx, cy, s*0.28, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#1b5e20'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(cx, cy, s*0.28, 0.4, 2.7); ctx.stroke();
+    } else if (idx === 5){
+      // Galaxian Flagship
+      ctx.fillStyle = '#ffd600';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - s*0.3);
+      ctx.lineTo(cx + s*0.26, cy + s*0.26);
+      ctx.lineTo(cx, cy + s*0.1);
+      ctx.lineTo(cx - s*0.26, cy + s*0.26);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#2979ff';
+      ctx.fillRect(cx - s*0.16, cy + s*0.02, s*0.32, s*0.09);
+    } else if (idx === 6){
+      // Cloche
+      ctx.fillStyle = '#ffea00';
+      ctx.beginPath();
+      ctx.arc(cx, cy - s*0.08, s*0.19, Math.PI, 0);
+      ctx.lineTo(cx + s*0.24, cy + s*0.24);
+      ctx.lineTo(cx - s*0.24, cy + s*0.24);
+      ctx.closePath(); ctx.fill();
+    } else {
+      // Clé
+      ctx.fillStyle = '#00e5ff';
+      ctx.beginPath(); ctx.arc(cx, cy - s*0.14, s*0.14, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#020712';
+      ctx.beginPath(); ctx.arc(cx, cy - s*0.14, s*0.06, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#00e5ff';
+      ctx.fillRect(cx - s*0.05, cy, s*0.1, s*0.3);
+      ctx.fillRect(cx, cy + s*0.09, s*0.15, s*0.06);
+      ctx.fillRect(cx, cy + s*0.21, s*0.15, s*0.06);
+    }
+    ctx.restore();
   }
 
   function drawFloaters(){
@@ -913,10 +1302,10 @@
     ctx.globalAlpha = 1;
   }
 
-  // ---------- Init ----------
+  // ---------- Démarrage de la boucle ----------
   resize();
   highEl.textContent = hi;
-  requestAnimationFrame(function(now){ lastTime = now; requestAnimationFrame(loop); });
+  requestAnimationFrame(loop);
 })();
 </script>
 </body>

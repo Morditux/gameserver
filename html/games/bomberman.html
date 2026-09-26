@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <meta name="description" content="BOMBERMAN — Le Poseur de Bombes : détruis les briques, ramasse les bonus et élimine les ennemis, au clavier ou au tactile."/>
 <title>Bomberman — Le Poseur de Bombes</title>
 <style>
@@ -29,6 +29,15 @@
     color:#eaf6ff;font-size:17px;text-decoration:none;cursor:pointer;touch-action:manipulation;}
   .hud-btn:hover{background:rgba(255,255,255,.16);}
   .hud-btn:active{transform:scale(.94);}
+  @media (max-width:640px){
+    #hud{flex-wrap:wrap;gap:6px 12px;padding:6px 10px;align-items:flex-start;}
+    #hud .label{font-size:8px;letter-spacing:1px;}
+    #hud .value{font-size:14px;}
+    #hud .power .value{font-size:11px;white-space:nowrap;}
+    .stat.power{order:2;flex-basis:100%;}
+    .hud-buttons{order:1;}
+    .hud-btn{width:32px;height:32px;font-size:14px;border-radius:8px;}
+  }
 
   /* ---------- Écrans ---------- */
   .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -82,6 +91,13 @@
     border:2px solid rgba(255,140,80,.7);color:#fff;cursor:pointer;pointer-events:auto;
     touch-action:none;user-select:none;box-shadow:0 0 24px rgba(255,120,40,.45);}
   #bombBtn:active{transform:scale(.92);background:radial-gradient(circle at 35% 30%,rgba(255,180,120,.7),rgba(120,30,10,.85));}
+  #actionBtns{display:flex;align-items:center;gap:14px;pointer-events:auto;}
+  #detoBtn{display:none;width:64px;height:64px;border-radius:50%;font-size:26px;align-items:center;
+    justify-content:center;background:radial-gradient(circle at 35% 30%,rgba(190,130,255,.4),rgba(40,10,70,.75));
+    border:2px solid rgba(190,130,255,.7);color:#fff;cursor:pointer;pointer-events:auto;
+    touch-action:none;user-select:none;box-shadow:0 0 20px rgba(150,80,255,.4);}
+  #detoBtn.on{display:flex;}
+  #detoBtn:active{transform:scale(.92);background:radial-gradient(circle at 35% 30%,rgba(220,170,255,.7),rgba(80,20,130,.85));}
 </style>
 </head>
 <body>
@@ -102,7 +118,7 @@
 </div>
 
 <div id="pauseTag">PAUSE</div>
-<div id="banner"></div>
+<div id="banner" role="status" aria-live="polite"></div>
 
 <div id="touchControls">
   <div id="dpad">
@@ -111,7 +127,10 @@
     <button class="d-btn" id="btnDown" aria-label="Bas">▼</button>
     <button class="d-btn" id="btnRight" aria-label="Droite">▶</button>
   </div>
-  <button id="bombBtn" aria-label="Poser une bombe">💣</button>
+  <div id="actionBtns">
+    <button id="detoBtn" aria-label="Détonateur" title="Détonateur (Entrée)">📟</button>
+    <button id="bombBtn" aria-label="Poser une bombe">💣</button>
+  </div>
 </div>
 
 <div id="overlay" class="overlay">
@@ -122,14 +141,18 @@
   <div class="legend" id="legend">
     <span class="chip">💣 Bombe : <kbd>Espace</kbd></span>
     <span class="chip">🧱 Brique : +10 pts</span>
-    <span class="chip">👾 Ennemi : +100 pts</span>
+    <span class="chip">👾 Ennemi : +100 pts (mini +50)</span>
     <span class="chip">🚪 Porte : niveau suivant</span>
     <span class="chip">💣 Bonus +1 bombe</span>
     <span class="chip">💥 Bonus +1 portée</span>
     <span class="chip">👟 Bonus vitesse</span>
+    <span class="chip">🧤 Gant : pousse les bombes</span>
+    <span class="chip">📟 Détonateur : <kbd>Entrée</kbd></span>
+    <span class="chip">🛡 Armure : absorbe 1 coup</span>
   </div>
   <p id="controls">Clavier : <kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> ou <kbd>Z Q S D</kbd> ·
-     Tactile : D-pad et bouton 💣 à l'écran, ou glisse le doigt sur le plateau.</p>
+     <kbd>Espace</kbd> bombe · <kbd>Entrée</kbd> détonateur ·
+     Tactile : D-pad et bouton 💣, ou joystick virtuel en glissant le doigt sur le plateau.</p>
   <div class="scoreLine" id="scoreLine"></div>
   <button id="startBtn">▶ Jouer</button>
 </div>
@@ -160,10 +183,11 @@
   const btnLeft = document.getElementById('btnLeft');
   const btnRight = document.getElementById('btnRight');
   const bombBtn = document.getElementById('bombBtn');
+  const detoBtn = document.getElementById('detoBtn');
 
   // ---------- Constantes ----------
   const COLS = 13, ROWS = 11;
-  const T = { FLOOR: 0, WALL: 1, BRICK: 2 };
+  const T = { FLOOR: 0, WALL: 1, BRICK: 2, HARD: 3 };
   const BOMB_TIME = 2.2;        // secondes avant explosion
   const FLAME_TIME = 0.45;      // durée des flammes
   const BASE_SPEED = 3.4;       // cases par seconde
@@ -174,6 +198,7 @@
     {x:COLS-4, y:ROWS-4}, {x:COLS-6, y:ROWS-2}, {x:COLS-2, y:ROWS-6}
   ];
   const HI_KEY = 'bomberman.record';
+  const MUTE_KEY = 'bomberman.muet';
 
   // ---------- État ----------
   let grid = [];
@@ -182,14 +207,19 @@
   let enemies = [];
   let powerups = [];
   let door = { x:-1, y:-1, revealed:false, active:false };
-  let player = { x:1.5, y:1.5, dir:{x:0,y:1}, speed:BASE_SPEED, maxBombs:1, range:1, lives:3, invuln:0 };
-  let score = 0, level = 1, state = 'menu', paused = false, muted = false;
+  let player = { x:1.5, y:1.5, dir:{x:0,y:1}, speed:BASE_SPEED, maxBombs:1, range:1, lives:3, invuln:0,
+                 gant:false, deto:false, shield:false };
+  let score = 0, level = 1, state = 'menu', paused = false, muted = false, beatRecord = false;
   let highScore = 0;
   try { highScore = +localStorage.getItem(HI_KEY) || 0; } catch(e){}
+  try { muted = localStorage.getItem(MUTE_KEY) === '1'; } catch(e){}
 
   let tile = 32, ox = 0, oy = 0, dpr = 1;
   let lastTime = 0, clearTimer = 0, bannerTimer = null;
-  let virtualDir = {x:0,y:0}, swipeDir = null, swipeUntil = 0, lastAxis = 'x';
+  let virtualDir = {x:0,y:0}, lastAxis = 'x';
+  let joyId = null, joyActive = false, joyAnchor = {x:0,y:0}, joyThumb = {x:0,y:0}, joyDir = {x:0,y:0};
+  let hudKey = '', doorHintShown = false;
+  let flameSet = new Set();
   const keys = {};
 
   // ---------- Mise en page ----------
@@ -211,6 +241,7 @@
     ox = Math.floor((w - COLS * tile) / 2);
     oy = Math.floor(70 + (availH - ROWS * tile) / 2);
     if (oy < 64) oy = 64;
+    rebuildLayers();
   }
   window.addEventListener('resize', layout);
 
@@ -256,9 +287,14 @@
       src.start();
     } catch(e){}
   }
+  function vibrate(pattern){
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e){}
+  }
   function beep(kind){
     if (kind === 'place') tone(170, 0.12, 'square', 0.09);
     else if (kind === 'explode'){ noise(0.5, 0.32); tone(70, 0.4, 'sawtooth', 0.11); }
+    else if (kind === 'kick') tone(120, 0.1, 'square', 0.1);
+    else if (kind === 'shield'){ tone(900, 0.08, 'square', 0.1); tone(500, 0.15, 'square', 0.1, 0.07); tone(250, 0.2, 'sawtooth', 0.1, 0.18); }
     else if (kind === 'brick') tone(330, 0.06, 'square', 0.05);
     else if (kind === 'power'){ tone(660, 0.09, 'square', 0.09); tone(880, 0.09, 'square', 0.09, 0.09); tone(1320, 0.12, 'square', 0.09, 0.18); }
     else if (kind === 'enemy'){ tone(430, 0.08, 'square', 0.09); tone(250, 0.13, 'square', 0.09, 0.07); }
@@ -271,10 +307,55 @@
   function saveHi(){ try { localStorage.setItem(HI_KEY, String(highScore)); } catch(e){} }
   function addScore(n){
     score += n;
-    if (score > highScore){ highScore = score; saveHi(); }
+    if (score > highScore){ highScore = score; beatRecord = true; saveHi(); }
   }
 
   // ---------- Construction du niveau ----------
+  function shuffle(a){
+    for (let i = a.length - 1; i > 0; i--){
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+
+  // Toutes les cases non murales restent atteignables (briques dures comprises)
+  function reachableOk(){
+    const seen = new Array(COLS * ROWS).fill(false);
+    const q = [{x:1, y:1}];
+    seen[COLS + 1] = true;
+    while (q.length){
+      const c = q.pop();
+      for (let i = 0; i < DIRS.length; i++){
+        const nx = c.x + DIRS[i].x, ny = c.y + DIRS[i].y;
+        if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+        const t = grid[ny][nx];
+        if (t === T.WALL || t === T.HARD) continue;
+        const k = ny * COLS + nx;
+        if (seen[k]) continue;
+        seen[k] = true;
+        q.push({x:nx, y:ny});
+      }
+    }
+    for (let y = 0; y < ROWS; y++){
+      for (let x = 0; x < COLS; x++){
+        if (grid[y][x] !== T.WALL && grid[y][x] !== T.HARD && !seen[y * COLS + x]) return false;
+      }
+    }
+    return true;
+  }
+
+  // Ajoute des briques indestructibles sans jamais isoler une zone du plateau
+  function addHardBricks(n, candidates){
+    for (let i = 0; i < candidates.length && n > 0; i++){
+      const c = candidates[i];
+      if (grid[c.y][c.x] !== T.BRICK) continue;
+      grid[c.y][c.x] = T.HARD;
+      if (reachableOk()) n--;
+      else grid[c.y][c.x] = T.BRICK;
+    }
+  }
+
   function buildLevel(){
     grid = [];
     for (let y = 0; y < ROWS; y++){
@@ -294,7 +375,7 @@
     ENEMY_SPAWNS.forEach(function(s){ clear[s.x + ',' + s.y] = true; });
 
     // Briques destructibles
-    const density = Math.min(0.42, 0.30 + (level - 1) * 0.02);
+    const density = Math.min(0.50, 0.30 + (level - 1) * 0.02);
     let brickCells = [];
     for (let y = 1; y < ROWS - 1; y++){
       for (let x = 1; x < COLS - 1; x++){
@@ -307,8 +388,15 @@
       }
     }
 
+    // Bonus : 3 de base + jusqu'à 3 bonus avancés selon le niveau
+    const core = ['bombe', 'feu', 'vitesse'];
+    const extra = shuffle(['gant', 'deto', 'armure']);
+    const types = core.concat(extra.slice(0, Math.min(extra.length, Math.floor(level / 2))));
+    const needed = types.length + 1;
+
     // Garantir assez de briques pour cacher la porte et les bonus
-    while (brickCells.length < 4){
+    let guard = 0;
+    while (brickCells.length < needed && guard++ < 400){
       const x = 1 + Math.floor(Math.random() * (COLS - 2));
       const y = 1 + Math.floor(Math.random() * (ROWS - 2));
       if (grid[y][x] === T.FLOOR && !clear[x + ',' + y]){
@@ -317,30 +405,35 @@
       }
     }
 
-    // Mélange puis affectation : porte + 3 bonus sous des briques distinctes
-    for (let i = brickCells.length - 1; i > 0; i--){
-      const j = Math.floor(Math.random() * (i + 1));
-      const tmp = brickCells[i]; brickCells[i] = brickCells[j]; brickCells[j] = tmp;
-    }
+    // Mélange puis affectation : porte + bonus sous des briques distinctes
+    shuffle(brickCells);
     door = { x:brickCells[0].x, y:brickCells[0].y, revealed:false, active:false };
     powerups = [];
-    const types = ['bombe','feu','vitesse'];
     for (let i = 0; i < types.length; i++){
       powerups.push({ x:brickCells[i+1].x, y:brickCells[i+1].y, type:types[i], hidden:true, taken:false });
     }
+
+    // Briques indestructibles : difficulté supplémentaire à partir du niveau 5
+    addHardBricks(Math.min(6, Math.max(0, level - 4)), brickCells.slice(needed));
+    rebuildLayers();
   }
 
   function spawnEnemies(){
     enemies = [];
-    const count = Math.min(5, level + 1);
+    const count = Math.min(ENEMY_SPAWNS.length, level + 1);
+    const baseSpeed = Math.min(2.5, 1.6 + (level - 1) * 0.1);
     for (let i = 0; i < count; i++){
       const s = ENEMY_SPAWNS[i];
-      const fast = level >= 3 && i % 2 === 1;
+      let type = 'slime';
+      if (level >= 3 && i % 3 === 1) type = 'fantome';
+      else if (level >= 2 && i % 3 === 2) type = 'chasseur';
+      const speed = type === 'fantome' ? Math.min(3.2, baseSpeed * 1.3)
+                  : type === 'chasseur' ? baseSpeed * 1.12
+                  : baseSpeed;
       enemies.push({
         x: s.x + 0.5, y: s.y + 0.5,
         dir: {x:0,y:-1}, target: null, from: {x:s.x, y:s.y},
-        speed: fast ? 2.4 : 1.6,
-        type: fast ? 'fantome' : 'slime'
+        home: {x:s.x, y:s.y}, speed: speed, type: type, mini: false, size: 0.32
       });
     }
   }
@@ -349,6 +442,8 @@
     buildLevel();
     bombs = [];
     flames = [];
+    flameSet.clear();
+    doorHintShown = false;
     player.x = 1.5; player.y = 1.5;
     player.dir = {x:0,y:1};
     player.invuln = 1.6;
@@ -365,10 +460,14 @@
   function newGame(){
     score = 0;
     level = 1;
+    beatRecord = false;
     player.speed = BASE_SPEED;
     player.maxBombs = 1;
     player.range = 1;
     player.lives = 3;
+    player.gant = false;
+    player.deto = false;
+    player.shield = false;
     startLevel();
   }
 
@@ -393,16 +492,40 @@
     showOverlayGameOver();
   }
 
+  // Écarte les ennemis trop proches du point de réapparition
+  function clearSpawnArea(){
+    for (let i = 0; i < enemies.length; i++){
+      const e = enemies[i];
+      if (Math.hypot(e.x - 1.5, e.y - 1.5) >= 3.2) continue;
+      e.x = e.home.x + 0.5;
+      e.y = e.home.y + 0.5;
+      e.from = {x:e.home.x, y:e.home.y};
+      e.target = null;
+      e.dir = {x:0, y:-1};
+    }
+  }
+
   function killPlayer(){
     if (state !== 'play' || player.invuln > 0) return;
+    if (player.shield){
+      player.shield = false;
+      player.invuln = 1.6;
+      beep('shield');
+      vibrate(30);
+      showBanner('BOUCLIER BRISÉ !', 1.1);
+      updateHud();
+      return;
+    }
     player.lives--;
     beep('death');
+    vibrate(120);
     if (player.lives <= 0){
       player.lives = 0;
       updateHud();
       gameOver();
       return;
     }
+    clearSpawnArea();
     player.x = 1.5;
     player.y = 1.5;
     player.dir = {x:0,y:1};
@@ -413,8 +536,26 @@
   function killEnemy(e){
     if (e.dead) return;
     e.dead = true;
-    addScore(100);
+    addScore(e.mini ? 50 : 100);
+    // Les slimes se divisent à partir du niveau 4
+    if (e.type === 'slime' && !e.mini && level >= 4){
+      const tx = Math.floor(e.x), ty = Math.floor(e.y);
+      let spawned = 0;
+      for (let i = 0; i < DIRS.length && spawned < 2; i++){
+        const d = DIRS[i];
+        const nx = tx + d.x, ny = ty + d.y;
+        if (!canEnemyEnter(nx, ny, 'slime')) continue;
+        if (Math.hypot(nx + 0.5 - player.x, ny + 0.5 - player.y) < 1.4) continue;
+        enemies.push({
+          x: nx + 0.5, y: ny + 0.5, dir: d, target: null,
+          from: {x:nx, y:ny}, home: {x:nx, y:ny},
+          speed: Math.min(3.0, e.speed + 0.5), type: 'slime', mini: true, size: 0.22
+        });
+        spawned++;
+      }
+    }
     beep('enemy');
+    vibrate(12);
   }
 
   // ---------- Aides plateau ----------
@@ -425,10 +566,7 @@
     return null;
   }
   function flameAt(tx, ty){
-    for (let i = 0; i < flames.length; i++){
-      if (flames[i].x === tx && flames[i].y === ty) return true;
-    }
-    return false;
+    return flameSet.has(ty * COLS + tx);
   }
   function aabbTile(x, y, r, tx, ty, inset){
     const i = inset || 0;
@@ -447,9 +585,11 @@
     }
     return true;
   }
-  function canEnemyEnter(tx, ty){
+  function canEnemyEnter(tx, ty, type){
     if (tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS) return false;
-    if (grid[ty][tx] !== T.FLOOR) return false;
+    const t = grid[ty][tx];
+    if (t === T.WALL || t === T.HARD) return false;
+    if (t === T.BRICK && type !== 'fantome') return false; // le fantôme traverse les briques
     if (bombAt(tx, ty)) return false;
     return true;
   }
@@ -488,9 +628,51 @@
     beep('place');
   }
 
+  function detonate(){
+    if (state !== 'play' || paused || !player.deto || !bombs.length) return;
+    // La plus ancienne bombe posée explose à distance
+    bombs[0].timer = -1;
+    beep('place');
+    vibrate(10);
+  }
+
+  // Gant : pousse la bombe rencontrée jusqu'au premier obstacle
+  function kickBomb(b, dir){
+    const path = [];
+    let cx = b.x, cy = b.y;
+    while (true){
+      const nx = cx + dir.x, ny = cy + dir.y;
+      if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) break;
+      if (grid[ny][nx] !== T.FLOOR || bombAt(nx, ny)) break;
+      cx = nx; cy = ny;
+      path.push({x:cx, y:cy});
+    }
+    if (!path.length) return;
+    b.x = cx; b.y = cy;
+    beep('kick');
+    vibrate(10);
+    for (let i = 0; i < path.length; i++){
+      for (let j = 0; j < enemies.length; j++){
+        const e = enemies[j];
+        if (Math.floor(e.x) === path[i].x && Math.floor(e.y) === path[i].y) killEnemy(e);
+      }
+    }
+  }
+
+  function tryKick(d){
+    // Case adjacente dans le sens du déplacement (le joueur vient d'être bloqué)
+    const tx = Math.floor(player.x) + d.x;
+    const ty = Math.floor(player.y) + d.y;
+    const b = bombAt(tx, ty);
+    if (!b) return;
+    if (aabbTile(player.x, player.y, 0.34, tx, ty)) return; // bombe encore sous le joueur
+    kickBomb(b, d);
+  }
+
   function destroyBrick(tx, ty){
     if (grid[ty][tx] !== T.BRICK) return;
     grid[ty][tx] = T.FLOOR;
+    brickCtx.clearRect(ox + tx * tile, oy + ty * tile, tile, tile);
     addScore(10);
     if (door.x === tx && door.y === ty) door.revealed = true;
     for (let i = 0; i < powerups.length; i++){
@@ -500,22 +682,34 @@
     beep('brick');
   }
 
-  function explodeBomb(b){
+  // Cases couvertes par une explosion (la brique touchée est incluse)
+  function blastCells(b){
     const cells = [{x:b.x, y:b.y}];
     for (let d = 0; d < DIRS.length; d++){
       const dir = DIRS[d];
       for (let i = 1; i <= b.range; i++){
         const tx = b.x + dir.x * i, ty = b.y + dir.y * i;
         if (tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS) break;
-        if (grid[ty][tx] === T.WALL) break;
-        if (grid[ty][tx] === T.BRICK){ destroyBrick(tx, ty); break; }
+        const t = grid[ty][tx];
+        if (t === T.WALL || t === T.HARD) break;
         cells.push({x:tx, y:ty});
-        const other = bombAt(tx, ty);
-        if (other) other.timer = -1;   // chaîne d'explosions
+        if (t === T.BRICK) break;
       }
+    }
+    return cells;
+  }
+
+  function explodeBomb(b){
+    const cells = blastCells(b);
+    for (let i = 0; i < cells.length; i++){
+      const c = cells[i];
+      if (grid[c.y][c.x] === T.BRICK){ destroyBrick(c.x, c.y); continue; }
+      const other = bombAt(c.x, c.y);
+      if (other && other !== b) other.timer = -1;   // chaîne d'explosions
     }
     for (let i = 0; i < cells.length; i++) flames.push({ x:cells[i].x, y:cells[i].y, t:0 });
     beep('explode');
+    vibrate(25);
   }
 
   function updateBombs(dt){
@@ -531,6 +725,8 @@
   function updateFlames(dt){
     for (let i = 0; i < flames.length; i++) flames[i].t += dt;
     flames = flames.filter(function(f){ return f.t < FLAME_TIME; });
+    flameSet.clear();
+    for (let i = 0; i < flames.length; i++) flameSet.add(flames[i].y * COLS + flames[i].x);
   }
 
   // ---------- Joueur ----------
@@ -550,7 +746,7 @@
 
     let d = keyDir();
     if (!d.x && !d.y) d = virtualDir;
-    if (!d.x && !d.y && swipeDir && performance.now() < swipeUntil) d = swipeDir;
+    if (!d.x && !d.y) d = joyDir;
     if (!d.x && !d.y) return;
     if (d.x && d.y) d = lastAxis === 'x' ? {x:d.x, y:0} : {x:0, y:d.y};
 
@@ -559,10 +755,12 @@
     if (d.x){
       const nx = player.x + d.x * step;
       if (canPlayerBeAt(nx, player.y)) player.x = nx;
+      else if (player.gant) tryKick(d);
     }
     if (d.y){
       const ny = player.y + d.y * step;
       if (canPlayerBeAt(player.x, ny)) player.y = ny;
+      else if (player.gant) tryKick(d);
     }
     player.x = Math.max(0.35, Math.min(COLS - 0.35, player.x));
     player.y = Math.max(0.35, Math.min(ROWS - 0.35, player.y));
@@ -579,15 +777,25 @@
       p.taken = true;
       addScore(50);
       beep('power');
+      vibrate(15);
       if (p.type === 'bombe'){
         player.maxBombs = Math.min(6, player.maxBombs + 1);
         showBanner('+1 BOMBE', 1.0);
       } else if (p.type === 'feu'){
         player.range = Math.min(6, player.range + 1);
         showBanner('+1 PORTÉE', 1.0);
-      } else {
+      } else if (p.type === 'vitesse'){
         player.speed = Math.min(MAX_SPEED, player.speed + 0.5);
         showBanner('VITESSE +', 1.0);
+      } else if (p.type === 'gant'){
+        player.gant = true;
+        showBanner('GANT : POUSSE LES BOMBES !', 1.2);
+      } else if (p.type === 'deto'){
+        player.deto = true;
+        showBanner('DÉTONATEUR : ENTRÉE !', 1.2);
+      } else {
+        player.shield = true;
+        showBanner('ARMURE : 1 COUP ABSORBÉ', 1.2);
       }
       updateHud();
     }
@@ -599,18 +807,30 @@
     let opts = [];
     for (let i = 0; i < DIRS.length; i++){
       const d = DIRS[i];
-      if (canEnemyEnter(tx + d.x, ty + d.y) && !isDangerous(tx + d.x, ty + d.y)) opts.push(d);
+      if (canEnemyEnter(tx + d.x, ty + d.y, e.type) && !isDangerous(tx + d.x, ty + d.y)) opts.push(d);
     }
     if (!opts.length){
       for (let i = 0; i < DIRS.length; i++){
         const d = DIRS[i];
-        if (canEnemyEnter(tx + d.x, ty + d.y)) opts.push(d);
+        if (canEnemyEnter(tx + d.x, ty + d.y, e.type)) opts.push(d);
       }
     }
     if (!opts.length){ e.target = null; return; }
     const fwd = opts.filter(function(d){ return !(d.x === -e.dir.x && d.y === -e.dir.y); });
     const list = fwd.length ? fwd : opts;
-    const d = list[Math.floor(Math.random() * list.length)];
+    let d;
+    // Le chasseur poursuit le joueur tant qu'il le repère
+    if (e.type === 'chasseur' && Math.abs(player.x - e.x) + Math.abs(player.y - e.y) <= 8 && Math.random() < 0.8){
+      let best = list[0], bestDist = Infinity;
+      for (let i = 0; i < list.length; i++){
+        const nx = tx + list[i].x, ny = ty + list[i].y;
+        const dist = Math.abs(nx + 0.5 - player.x) + Math.abs(ny + 0.5 - player.y);
+        if (dist < bestDist){ bestDist = dist; best = list[i]; }
+      }
+      d = best;
+    } else {
+      d = list[Math.floor(Math.random() * list.length)];
+    }
     e.dir = d;
     e.from = {x:tx, y:ty};
     e.target = {x:tx + d.x, y:ty + d.y};
@@ -638,7 +858,7 @@
         e.target = null;
         e.from = arrived;
         const fx = arrived.x + e.dir.x, fy = arrived.y + e.dir.y;
-        if ((!e.dir.x && !e.dir.y) || !canEnemyEnter(fx, fy) || isDangerous(fx, fy) || Math.random() < 0.25){
+        if ((!e.dir.x && !e.dir.y) || !canEnemyEnter(fx, fy, e.type) || isDangerous(fx, fy) || Math.random() < 0.25){
           pickEnemyTarget(e);
         } else {
           e.target = {x:fx, y:fy};
@@ -659,8 +879,10 @@
     }
     for (let i = 0; i < enemies.length; i++){
       const e = enemies[i];
+      // Un fantôme réfugié dans une brique est à l'abri des flammes
+      if (e.type === 'fantome' && grid[Math.floor(e.y)][Math.floor(e.x)] === T.BRICK) continue;
       for (let j = 0; j < flames.length; j++){
-        if (aabbTile(e.x, e.y, 0.3, flames[j].x, flames[j].y, 0.08)){ killEnemy(e); break; }
+        if (aabbTile(e.x, e.y, e.mini ? 0.2 : 0.3, flames[j].x, flames[j].y, 0.08)){ killEnemy(e); break; }
       }
     }
     if (enemies.some(function(e){ return e.dead; })){
@@ -668,7 +890,8 @@
     }
     if (player.invuln <= 0){
       for (let i = 0; i < enemies.length; i++){
-        if (Math.hypot(enemies[i].x - player.x, enemies[i].y - player.y) < 0.62){
+        const e = enemies[i];
+        if (Math.hypot(e.x - player.x, e.y - player.y) < (e.mini ? 0.5 : 0.62)){
           killPlayer();
           break;
         }
@@ -678,6 +901,11 @@
 
   function checkDoor(){
     door.active = enemies.length === 0;
+    if (door.active && !door.revealed && !doorHintShown && state === 'play'){
+      doorHintShown = true;
+      showBanner('TOUS LES ENNEMIS ÉLIMINÉS !', 1.2);
+      showBanner('TROUVEZ LA PORTE CACHÉE !', 1.6, 1.3);
+    }
     if (door.active && door.revealed &&
         Math.floor(player.x) === door.x && Math.floor(player.y) === door.y){
       levelClear();
@@ -686,15 +914,26 @@
 
   // ---------- HUD ----------
   function updateHud(){
+    const key = score + '|' + highScore + '|' + level + '|' + player.lives + '|' + enemies.length + '|' +
+      player.maxBombs + '|' + player.range + '|' + player.speed + '|' + player.gant + player.deto + player.shield;
+    if (key === hudKey) return;
+    hudKey = key;
     scoreEl.textContent = score;
     recordEl.textContent = highScore;
     levelEl.textContent = level;
     livesEl.textContent = '❤'.repeat(Math.max(0, player.lives));
     enemiesEl.textContent = enemies.length;
-    powerEl.textContent = '💣' + player.maxBombs + ' · 💥' + player.range + ' · 👟' + player.speed.toFixed(1);
+    powerEl.textContent = '💣' + player.maxBombs + ' · 💥' + player.range + ' · 👟' + player.speed.toFixed(1) +
+      (player.gant ? ' · 🧤' : '') + (player.deto ? ' · 📟' : '') + (player.shield ? ' · 🛡' : '');
+    detoBtn.classList.toggle('on', player.deto);
   }
 
-  function showBanner(text, dur){
+  function showBanner(text, dur, delay){
+    if (delay){
+      clearTimeout(bannerTimer);
+      bannerTimer = setTimeout(function(){ showBanner(text, dur); }, delay * 1000);
+      return;
+    }
     banner.textContent = text;
     banner.classList.add('show');
     clearTimeout(bannerTimer);
@@ -710,7 +949,7 @@
     legend.style.display = 'none';
     controls.style.display = 'none';
     scoreLine.innerHTML = 'Score : ' + score + ' — Niveau ' + level + '<br/>' +
-      (score >= highScore && score > 0 ? '🏆 Nouveau record !' : 'Record : ' + highScore);
+      (beatRecord ? '🏆 Nouveau record !' : 'Record : ' + highScore);
     startBtn.textContent = '↻ Rejouer';
   }
 
@@ -728,12 +967,15 @@
     if (state !== 'play') return;
     paused = !paused;
     pauseTag.classList.toggle('on', paused);
+    pauseBtn.setAttribute('aria-pressed', paused ? 'true' : 'false');
     lastTime = performance.now();
   }
 
   function toggleMute(){
     muted = !muted;
     muteBtn.textContent = muted ? '🔇' : '🔊';
+    muteBtn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+    try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch(e){}
   }
 
   // ---------- Boucle ----------
@@ -769,6 +1011,35 @@
     c.closePath();
   }
 
+  // ---------- Calques pré-rendus ----------
+  const bgLayer = document.createElement('canvas');
+  const bgCtx = bgLayer.getContext('2d');
+  const brickLayer = document.createElement('canvas');
+  const brickCtx = brickLayer.getContext('2d');
+
+  function prepareLayer(cv, c){
+    cv.width = Math.round(innerWidth * dpr);
+    cv.height = Math.round(innerHeight * dpr);
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, innerWidth, innerHeight);
+  }
+
+  // Sol, murs et briques dures ne changent qu'à la construction du niveau
+  function rebuildLayers(){
+    if (!grid.length) return;
+    prepareLayer(bgLayer, bgCtx);
+    prepareLayer(brickLayer, brickCtx);
+    drawFloor(bgCtx);
+    for (let y = 0; y < ROWS; y++){
+      for (let x = 0; x < COLS; x++){
+        const t = grid[y][x];
+        if (t === T.WALL) drawWall(bgCtx, x, y);
+        else if (t === T.HARD) drawHardBrick(bgCtx, x, y);
+        else if (t === T.BRICK) drawBrick(brickCtx, x, y);
+      }
+    }
+  }
+
   function draw(t){
     const w = innerWidth, h = innerHeight;
     const bg = ctx.createLinearGradient(0, 0, 0, h);
@@ -785,24 +1056,26 @@
     ctx.fillStyle = halo;
     ctx.fillRect(bx - bw, by - bh, bw * 3, bh * 3);
 
-    drawFloor();
+    ctx.drawImage(bgLayer, 0, 0, w, h);
     drawDoor(t);
     drawPowerups(t);
+    ctx.drawImage(brickLayer, 0, 0, w, h);
 
-    for (let y = 0; y < ROWS; y++){
-      for (let x = 0; x < COLS; x++){
-        if (grid[y][x] === T.BRICK) drawBrick(x, y);
-        else if (grid[y][x] === T.WALL) drawWall(x, y);
-      }
-    }
-
+    for (let i = 0; i < bombs.length; i++) drawBlastPreview(bombs[i]);
     for (let i = 0; i < bombs.length; i++) drawBomb(bombs[i], t);
     for (let i = 0; i < enemies.length; i++){
-      if (enemies[i].type === 'fantome') drawGhost(enemies[i], t);
-      else drawSlime(enemies[i], t);
+      const e = enemies[i];
+      if (e.type === 'fantome'){
+        const inBrick = grid[Math.floor(e.y)][Math.floor(e.x)] === T.BRICK;
+        ctx.globalAlpha = inBrick ? 0.45 : 1;
+        drawGhost(e, t);
+        ctx.globalAlpha = 1;
+      } else drawSlime(e, t);
     }
     drawPlayer(t);
     for (let i = 0; i < flames.length; i++) drawFlame(flames[i], t);
+
+    drawJoystick();
 
     // Bordure néon du plateau
     ctx.strokeStyle = 'rgba(0,212,255,0.45)';
@@ -810,61 +1083,81 @@
     ctx.strokeRect(ox - 1, oy - 1, COLS * tile + 2, ROWS * tile + 2);
   }
 
-  function drawFloor(){
+  function drawFloor(c){
     for (let y = 0; y < ROWS; y++){
       for (let x = 0; x < COLS; x++){
-        ctx.fillStyle = ((x + y) % 2 === 0) ? '#0c1626' : '#0e1a2c';
-        ctx.fillRect(ox + x * tile, oy + y * tile, tile, tile);
+        c.fillStyle = ((x + y) % 2 === 0) ? '#0c1626' : '#0e1a2c';
+        c.fillRect(ox + x * tile, oy + y * tile, tile, tile);
       }
     }
   }
 
-  function drawWall(x, y){
+  function drawWall(c, x, y){
     const px = ox + x * tile, py = oy + y * tile;
-    const g = ctx.createLinearGradient(px, py, px, py + tile);
+    const g = c.createLinearGradient(px, py, px, py + tile);
     g.addColorStop(0, '#2a3b57');
     g.addColorStop(1, '#131e31');
-    ctx.fillStyle = g;
-    roundRect(ctx, px + 1, py + 1, tile - 2, tile - 2, Math.max(3, tile * 0.12));
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0,212,255,0.35)';
-    ctx.lineWidth = Math.max(1, tile * 0.04);
-    roundRect(ctx, px + 1.5, py + 1.5, tile - 3, tile - 3, Math.max(3, tile * 0.12));
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(0,212,255,0.28)';
-    ctx.beginPath(); ctx.arc(px + tile * 0.25, py + tile * 0.25, Math.max(1, tile * 0.05), 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(px + tile * 0.75, py + tile * 0.75, Math.max(1, tile * 0.05), 0, Math.PI * 2); ctx.fill();
+    c.fillStyle = g;
+    roundRect(c, px + 1, py + 1, tile - 2, tile - 2, Math.max(3, tile * 0.12));
+    c.fill();
+    c.strokeStyle = 'rgba(0,212,255,0.35)';
+    c.lineWidth = Math.max(1, tile * 0.04);
+    roundRect(c, px + 1.5, py + 1.5, tile - 3, tile - 3, Math.max(3, tile * 0.12));
+    c.stroke();
+    c.fillStyle = 'rgba(0,212,255,0.28)';
+    c.beginPath(); c.arc(px + tile * 0.25, py + tile * 0.25, Math.max(1, tile * 0.05), 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.arc(px + tile * 0.75, py + tile * 0.75, Math.max(1, tile * 0.05), 0, Math.PI * 2); c.fill();
   }
 
-  function drawBrick(x, y){
+  function drawBrick(c, x, y){
     const px = ox + x * tile, py = oy + y * tile;
-    const g = ctx.createLinearGradient(px, py, px, py + tile);
+    const g = c.createLinearGradient(px, py, px, py + tile);
     g.addColorStop(0, '#b45309');
     g.addColorStop(1, '#7c2d12');
-    ctx.fillStyle = g;
-    roundRect(ctx, px + 1, py + 1, tile - 2, tile - 2, Math.max(2, tile * 0.08));
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
-    ctx.lineWidth = Math.max(1, tile * 0.045);
+    c.fillStyle = g;
+    roundRect(c, px + 1, py + 1, tile - 2, tile - 2, Math.max(2, tile * 0.08));
+    c.fill();
+    c.strokeStyle = 'rgba(0,0,0,0.45)';
+    c.lineWidth = Math.max(1, tile * 0.045);
     const rows = 3;
     for (let i = 1; i < rows; i++){
       const yy = py + (tile / rows) * i;
-      ctx.beginPath(); ctx.moveTo(px + 1, yy); ctx.lineTo(px + tile - 1, yy); ctx.stroke();
+      c.beginPath(); c.moveTo(px + 1, yy); c.lineTo(px + tile - 1, yy); c.stroke();
     }
     for (let i = 0; i < rows; i++){
       const yy = py + (tile / rows) * i;
       const off = (i % 2 === 0) ? 0.5 : 0.0;
-      ctx.beginPath(); ctx.moveTo(px + tile * off, yy); ctx.lineTo(px + tile * off, yy + tile / rows); ctx.stroke();
+      c.beginPath(); c.moveTo(px + tile * off, yy); c.lineTo(px + tile * off, yy + tile / rows); c.stroke();
       const off2 = (i % 2 === 0) ? 0.0 : 0.5;
-      ctx.beginPath(); ctx.moveTo(px + tile * off2, yy); ctx.lineTo(px + tile * off2, yy + tile / rows); ctx.stroke();
+      c.beginPath(); c.moveTo(px + tile * off2, yy); c.lineTo(px + tile * off2, yy + tile / rows); c.stroke();
     }
-    ctx.strokeStyle = 'rgba(255,200,120,0.35)';
-    ctx.lineWidth = Math.max(1, tile * 0.03);
-    ctx.beginPath();
-    ctx.moveTo(px + 2, py + tile - 2);
-    ctx.lineTo(px + 2, py + 2);
-    ctx.lineTo(px + tile - 2, py + 2);
-    ctx.stroke();
+    c.strokeStyle = 'rgba(255,200,120,0.35)';
+    c.lineWidth = Math.max(1, tile * 0.03);
+    c.beginPath();
+    c.moveTo(px + 2, py + tile - 2);
+    c.lineTo(px + 2, py + 2);
+    c.lineTo(px + tile - 2, py + 2);
+    c.stroke();
+  }
+
+  function drawHardBrick(c, x, y){
+    const px = ox + x * tile, py = oy + y * tile;
+    const g = c.createLinearGradient(px, py, px, py + tile);
+    g.addColorStop(0, '#5b6b82');
+    g.addColorStop(1, '#2c374a');
+    c.fillStyle = g;
+    roundRect(c, px + 1, py + 1, tile - 2, tile - 2, Math.max(2, tile * 0.08));
+    c.fill();
+    c.strokeStyle = 'rgba(190,220,255,0.35)';
+    c.lineWidth = Math.max(1, tile * 0.045);
+    roundRect(c, px + 1.5, py + 1.5, tile - 3, tile - 3, Math.max(2, tile * 0.08));
+    c.stroke();
+    c.fillStyle = 'rgba(220,235,255,0.5)';
+    const rr = Math.max(1, tile * 0.06);
+    const pts = [[0.24, 0.24], [0.76, 0.24], [0.24, 0.76], [0.76, 0.76]];
+    for (let i = 0; i < pts.length; i++){
+      c.beginPath(); c.arc(px + tile * pts[i][0], py + tile * pts[i][1], rr, 0, Math.PI * 2); c.fill();
+    }
   }
 
   function drawDoor(t){
@@ -934,13 +1227,66 @@
     ctx.fill();
   }
 
+  function drawMiniGlove(cx, cy, r){
+    ctx.fillStyle = '#ffca28';
+    roundRect(ctx, cx - r * 0.75, cy - r * 0.55, r * 1.5, r * 1.2, r * 0.3);
+    ctx.fill();
+    ctx.fillStyle = '#ff8f00';
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.3, cy - r * 0.55, r * 0.28, 0, Math.PI * 2);
+    ctx.arc(cx + r * 0.3, cy - r * 0.55, r * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#8d6e63';
+    ctx.fillRect(cx - r * 0.55, cy + r * 0.55, r * 1.1, r * 0.3);
+  }
+
+  function drawMiniDeto(cx, cy, r){
+    ctx.fillStyle = '#4a148c';
+    roundRect(ctx, cx - r * 0.6, cy - r * 0.7, r * 1.2, r * 1.75, r * 0.22);
+    ctx.fill();
+    ctx.strokeStyle = '#ce93d8';
+    ctx.lineWidth = Math.max(1, r * 0.14);
+    ctx.beginPath();
+    ctx.moveTo(cx + r * 0.3, cy - r * 0.7);
+    ctx.lineTo(cx + r * 0.55, cy - r * 1.25);
+    ctx.stroke();
+    ctx.fillStyle = '#ff5252';
+    ctx.beginPath(); ctx.arc(cx, cy - r * 0.15, r * 0.26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#e1bee7';
+    ctx.fillRect(cx - r * 0.35, cy + r * 0.35, r * 0.7, r * 0.18);
+    ctx.fillRect(cx - r * 0.35, cy + r * 0.68, r * 0.7, r * 0.18);
+  }
+
+  function drawMiniShield(cx, cy, r){
+    const g = ctx.createLinearGradient(cx, cy - r, cx, cy + r);
+    g.addColorStop(0, '#c5cae9');
+    g.addColorStop(1, '#5c6bc0');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - r * 1.05);
+    ctx.quadraticCurveTo(cx + r * 0.95, cy - r * 0.7, cx + r * 0.85, cy + r * 0.1);
+    ctx.quadraticCurveTo(cx + r * 0.7, cy + r * 0.85, cx, cy + r * 1.1);
+    ctx.quadraticCurveTo(cx - r * 0.7, cy + r * 0.85, cx - r * 0.85, cy + r * 0.1);
+    ctx.quadraticCurveTo(cx - r * 0.95, cy - r * 0.7, cx, cy - r * 1.05);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+    ctx.lineWidth = Math.max(1, r * 0.12);
+    ctx.stroke();
+  }
+
   function drawPowerups(t){
     for (let i = 0; i < powerups.length; i++){
       const p = powerups[i];
       if (p.taken || p.hidden) continue;
       const cxp = ox + (p.x + 0.5) * tile, cyp = oy + (p.y + 0.5) * tile;
       const bob = Math.sin(t * 4 + p.x) * tile * 0.05;
-      const col = p.type === 'bombe' ? '#ff6b6b' : p.type === 'feu' ? '#ffa726' : '#4dd0e1';
+      const col = p.type === 'bombe' ? '#ff6b6b'
+                : p.type === 'feu' ? '#ffa726'
+                : p.type === 'vitesse' ? '#4dd0e1'
+                : p.type === 'gant' ? '#ffca28'
+                : p.type === 'deto' ? '#ce93d8'
+                : '#9fa8da';
       const g = ctx.createRadialGradient(cxp, cyp + bob, 0, cxp, cyp + bob, tile * 0.5);
       g.addColorStop(0, col);
       g.addColorStop(1, 'rgba(0,0,0,0)');
@@ -950,13 +1296,28 @@
       ctx.globalAlpha = 1;
       if (p.type === 'bombe') drawMiniBomb(cxp, cyp + bob, tile * 0.3);
       else if (p.type === 'feu') drawMiniFlame(cxp, cyp + bob, tile * 0.3);
-      else drawMiniBolt(cxp, cyp + bob, tile * 0.3);
+      else if (p.type === 'vitesse') drawMiniBolt(cxp, cyp + bob, tile * 0.3);
+      else if (p.type === 'gant') drawMiniGlove(cxp, cyp + bob, tile * 0.28);
+      else if (p.type === 'deto') drawMiniDeto(cxp, cyp + bob, tile * 0.28);
+      else drawMiniShield(cxp, cyp + bob, tile * 0.3);
+    }
+  }
+
+  function drawBlastPreview(b){
+    const cells = blastCells(b);
+    const urgency = 1 - Math.max(0, Math.min(1, b.timer / BOMB_TIME));
+    ctx.fillStyle = 'rgba(255,110,50,' + (0.06 + urgency * 0.15).toFixed(3) + ')';
+    for (let i = 0; i < cells.length; i++){
+      const px = ox + cells[i].x * tile, py = oy + cells[i].y * tile;
+      roundRect(ctx, px + 2, py + 2, tile - 4, tile - 4, Math.max(2, tile * 0.12));
+      ctx.fill();
     }
   }
 
   function drawBomb(b, t){
     const cxp = ox + (b.x + 0.5) * tile, cyp = oy + (b.y + 0.5) * tile;
-    const pulse = 1 + Math.sin(t * 10 + b.x) * 0.06;
+    const urgency = 1 - Math.max(0, Math.min(1, b.timer / BOMB_TIME));
+    const pulse = 1 + Math.sin(t * (10 + urgency * 30) + b.x) * (0.06 + urgency * 0.08);
     const r = tile * 0.30 * pulse;
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.beginPath(); ctx.ellipse(cxp, cyp + r * 0.8, r * 1.05, r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
@@ -974,13 +1335,19 @@
     ctx.moveTo(cxp + r * 0.2, cyp - r * 0.85);
     ctx.quadraticCurveTo(cxp + r * 0.5, cyp - r * 1.2, cxp + r * 0.35, cyp - r * 1.5);
     ctx.stroke();
-    const sp = r * (0.16 + 0.1 * Math.abs(Math.sin(t * 18)));
+    const sp = r * (0.16 + (0.1 + urgency * 0.14) * Math.abs(Math.sin(t * (18 + urgency * 40))));
     const sg = ctx.createRadialGradient(cxp + r * 0.35, cyp - r * 1.55, 0, cxp + r * 0.35, cyp - r * 1.55, sp * 2.5);
     sg.addColorStop(0, '#ffffff');
     sg.addColorStop(0.4, '#ffd54f');
     sg.addColorStop(1, 'rgba(255,120,0,0)');
     ctx.fillStyle = sg;
     ctx.beginPath(); ctx.arc(cxp + r * 0.35, cyp - r * 1.55, sp * 2.5, 0, Math.PI * 2); ctx.fill();
+    // Lueur rouge à l'approche de l'explosion
+    if (urgency > 0.6){
+      ctx.strokeStyle = 'rgba(255,80,40,' + ((urgency - 0.6) * 1.5).toFixed(3) + ')';
+      ctx.lineWidth = Math.max(1.5, tile * 0.05);
+      ctx.beginPath(); ctx.arc(cxp, cyp, r * 1.15, 0, Math.PI * 2); ctx.stroke();
+    }
   }
 
   function drawFlame(f, t){
@@ -1019,25 +1386,41 @@
     ctx.fillStyle = '#dff1ff';
     ctx.beginPath(); ctx.arc(cxp - r * 0.3, cyp + r * 0.55, r * 0.22, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(cxp + r * 0.3, cyp + r * 0.55, r * 0.22, 0, Math.PI * 2); ctx.fill();
+    if (player.shield){
+      ctx.strokeStyle = 'rgba(159,168,218,0.9)';
+      ctx.lineWidth = Math.max(1.5, tile * 0.05);
+      ctx.beginPath(); ctx.arc(cxp, cyp, r * 1.25, 0, Math.PI * 2); ctx.stroke();
+    }
   }
 
   function drawSlime(e, t){
     const cxp = ox + e.x * tile, cyp = oy + e.y * tile;
-    const r = tile * 0.32;
+    const r = tile * (e.mini ? 0.22 : 0.32);
+    const chasseur = e.type === 'chasseur';
     const squash = 1 + Math.sin(t * 6 + e.x) * 0.06;
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.beginPath(); ctx.ellipse(cxp, cyp + r * 0.8, r * 1.0, r * 0.35, 0, 0, Math.PI * 2); ctx.fill();
     const g = ctx.createRadialGradient(cxp - r * 0.3, cyp - r * 0.4, r * 0.1, cxp, cyp, r * 1.1);
-    g.addColorStop(0, '#a5ffb0');
-    g.addColorStop(1, '#1f9d3a');
+    g.addColorStop(0, chasseur ? '#ffd08a' : '#a5ffb0');
+    g.addColorStop(1, chasseur ? '#e65100' : '#1f9d3a');
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.ellipse(cxp, cyp, r * squash, r / squash, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#ffffff';
     ctx.beginPath(); ctx.arc(cxp - r * 0.34, cyp - r * 0.1, r * 0.22, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(cxp + r * 0.34, cyp - r * 0.1, r * 0.22, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#05240f';
+    ctx.fillStyle = chasseur ? '#5d1200' : '#05240f';
     ctx.beginPath(); ctx.arc(cxp - r * 0.34 + e.dir.x * r * 0.08, cyp - r * 0.1 + e.dir.y * r * 0.08, r * 0.1, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(cxp + r * 0.34 + e.dir.x * r * 0.08, cyp - r * 0.1 + e.dir.y * r * 0.08, r * 0.1, 0, Math.PI * 2); ctx.fill();
+    if (chasseur){ // sourcils fâchés
+      ctx.strokeStyle = '#5d1200';
+      ctx.lineWidth = Math.max(1, r * 0.12);
+      ctx.beginPath();
+      ctx.moveTo(cxp - r * 0.52, cyp - r * 0.44);
+      ctx.lineTo(cxp - r * 0.16, cyp - r * 0.28);
+      ctx.moveTo(cxp + r * 0.52, cyp - r * 0.44);
+      ctx.lineTo(cxp + r * 0.16, cyp - r * 0.28);
+      ctx.stroke();
+    }
   }
 
   function drawGhost(e, t){
@@ -1070,6 +1453,23 @@
     ctx.beginPath(); ctx.arc(cxp + r * 0.34 + e.dir.x * r * 0.08, cyp - r * 0.2 + bob + e.dir.y * r * 0.08, r * 0.11, 0, Math.PI * 2); ctx.fill();
   }
 
+  // Joystick virtuel flottant (tactile)
+  function drawJoystick(){
+    if (!joyActive) return;
+    const dx = joyThumb.x - joyAnchor.x, dy = joyThumb.y - joyAnchor.y;
+    const dist = Math.hypot(dx, dy);
+    const max = 46;
+    const k = dist > max ? max / dist : 1;
+    const tx = joyAnchor.x + dx * k, ty = joyAnchor.y + dy * k;
+    ctx.strokeStyle = 'rgba(0,229,255,0.30)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(joyAnchor.x, joyAnchor.y, max, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(0,229,255,0.28)';
+    ctx.beginPath(); ctx.arc(tx, ty, 20, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,229,255,0.6)';
+    ctx.stroke();
+  }
+
   // ---------- Clavier ----------
   document.addEventListener('keydown', function(e){
     const k = e.key;
@@ -1079,11 +1479,19 @@
     if (k === 'm' || k === 'M'){ toggleMute(); return; }
     if (k === 'p' || k === 'P' || k === 'Escape'){ if (state === 'play') togglePause(); return; }
     if (state !== 'play'){
-      if (k === 'Enter' || k === ' ' || k === 'Spacebar'){ e.preventDefault(); ensureAudio(); newGame(); }
+      // Ne relancer que depuis le menu ou l'écran de fin, jamais pendant la transition de niveau
+      if ((state === 'menu' || state === 'over') && (k === 'Enter' || k === ' ' || k === 'Spacebar')){
+        e.preventDefault(); ensureAudio(); newGame();
+      }
       return;
     }
     if (k === ' ' || k === 'Spacebar'){
       if (!e.repeat) placeBomb();
+      return;
+    }
+    if (k === 'Enter' || k === 'e' || k === 'E'){
+      e.preventDefault();
+      if (!e.repeat) detonate();
       return;
     }
     if (k === 'ArrowLeft' || k === 'q' || k === 'Q' || k === 'a' || k === 'A' ||
@@ -1099,6 +1507,9 @@
   window.addEventListener('blur', function(){
     for (const k in keys) keys[k] = false;
     virtualDir = {x:0, y:0};
+    joyId = null;
+    joyActive = false;
+    joyDir = {x:0, y:0};
   });
 
   // ---------- Tactile ----------
@@ -1130,39 +1541,70 @@
   });
   bombBtn.addEventListener('contextmenu', function(e){ e.preventDefault(); });
 
-  // Glissement / tap sur le plateau
-  let tsx = null, tsy = null, tst = 0;
+  // Joystick virtuel flottant + tap pour poser une bombe
+  let joyStart = 0;
   canvas.addEventListener('touchstart', function(e){
     ensureAudio();
-    if (e.touches.length === 1){
-      tsx = e.touches[0].clientX;
-      tsy = e.touches[0].clientY;
-      tst = performance.now();
+    if (joyId !== null) return;
+    const t = e.changedTouches[0];
+    joyId = t.identifier;
+    joyAnchor = {x:t.clientX, y:t.clientY};
+    joyThumb = {x:t.clientX, y:t.clientY};
+    joyDir = {x:0, y:0};
+    joyActive = true;
+    joyStart = performance.now();
+  }, {passive:true});
+  canvas.addEventListener('touchmove', function(e){
+    if (joyId === null) return;
+    for (let i = 0; i < e.changedTouches.length; i++){
+      const t = e.changedTouches[i];
+      if (t.identifier !== joyId) continue;
+      joyThumb = {x:t.clientX, y:t.clientY};
+      const dx = t.clientX - joyAnchor.x, dy = t.clientY - joyAnchor.y;
+      if (Math.hypot(dx, dy) > 14){
+        joyDir = Math.abs(dx) > Math.abs(dy) ? {x:Math.sign(dx), y:0} : {x:0, y:Math.sign(dy)};
+      } else {
+        joyDir = {x:0, y:0};
+      }
     }
   }, {passive:true});
-  canvas.addEventListener('touchend', function(e){
-    if (tsx === null || tsy === null) return;
-    const tch = e.changedTouches[0];
-    const dx = tch.clientX - tsx, dy = tch.clientY - tsy;
-    const dist = Math.hypot(dx, dy);
-    const dt = performance.now() - tst;
-    tsx = null; tsy = null;
-    if (dist > 24 && dt < 500){
-      if (Math.abs(dx) > Math.abs(dy)) swipeDir = {x:Math.sign(dx), y:0};
-      else swipeDir = {x:0, y:Math.sign(dy)};
-      swipeUntil = performance.now() + 280;
-    } else if (dist < 20 && dt < 300){
-      placeBomb();
+  function endTouch(e){
+    if (joyId === null) return;
+    for (let i = 0; i < e.changedTouches.length; i++){
+      const t = e.changedTouches[i];
+      if (t.identifier !== joyId) continue;
+      const dt = performance.now() - joyStart;
+      const dx = t.clientX - joyAnchor.x, dy = t.clientY - joyAnchor.y;
+      if (Math.hypot(dx, dy) < 20 && dt < 300) placeBomb();
+      joyId = null;
+      joyActive = false;
+      joyDir = {x:0, y:0};
     }
-  }, {passive:true});
+  }
+  canvas.addEventListener('touchend', endTouch, {passive:true});
+  canvas.addEventListener('touchcancel', endTouch, {passive:true});
 
   // ---------- Boutons ----------
   startBtn.addEventListener('click', function(){ ensureAudio(); newGame(); });
   document.addEventListener('pointerdown', ensureAudio, {once:true});
   muteBtn.addEventListener('click', toggleMute);
   pauseBtn.addEventListener('click', togglePause);
+  detoBtn.addEventListener('pointerdown', function(e){
+    e.preventDefault();
+    ensureAudio();
+    detonate();
+  });
+  detoBtn.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+
+  // Pause automatique quand l'onglet passe en arrière-plan
+  document.addEventListener('visibilitychange', function(){
+    if (document.hidden && state === 'play' && !paused) togglePause();
+  });
 
   // ---------- Init ----------
+  muteBtn.textContent = muted ? '🔇' : '🔊';
+  muteBtn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+  pauseBtn.setAttribute('aria-pressed', 'false');
   layout();
   buildLevel();                 // plateau décoratif derrière le menu
   recordEl.textContent = highScore;

@@ -252,6 +252,26 @@
     background: rgba(255, 255, 255, 0.15);
     border-color: #00e5ff;
   }
+  @media (max-width: 600px) {
+    #hud {
+      flex-wrap: wrap;
+      gap: 4px 6px;
+      padding: 6px 8px;
+    }
+    #hud .label { font-size: 8px; letter-spacing: 0; }
+    #hud .value { font-size: 13px; letter-spacing: 0; }
+    #hud #livesVal { letter-spacing: 0; }
+    #hud .btnWrap { gap: 3px; margin-left: auto; }
+    .hud-btn { width: 30px; height: 34px; font-size: 14px; }
+    .overlay { gap: 9px; padding: 12px; overflow-y: auto; }
+    .overlay h1 { font-size: clamp(28px, 8vw, 42px); letter-spacing: 2px; }
+    .overlay .sub { font-size: 12px; letter-spacing: 1px; }
+    .overlay p { font-size: 13px; }
+    .overlay .chip { font-size: 11px; padding: 4px 8px; }
+  }
+  @media (max-height: 620px) {
+    .overlay { justify-content: flex-start; }
+  }
 </style>
 </head>
 <body>
@@ -283,7 +303,7 @@
   <div class="legend">
     <span class="chip">⚡ <b>Multi-billes</b></span>
     <span class="chip">🚀 <b>Canons Laser</b></span>
-    <span class="chip">↔️ <b>Paddle Large</b></span>
+    <span class="chip">↔️ <b>Raquette large</b></span>
     <span class="chip">🔥 <b>Bille de Feu</b></span>
     <span class="chip">🛡️ <b>Bouclier Bas</b></span>
     <span class="chip">💣 <b>Brique Explosive</b></span>
@@ -305,7 +325,7 @@
 
 <!-- Écran Game Over -->
 <div id="overOverlay" class="overlay over hidden">
-  <h1>GAME OVER</h1>
+  <h1>PARTIE TERMINÉE</h1>
   <div class="sub">Toutes les billes ont été perdues</div>
   <div class="scoreLine" id="overScore">Score : 0</div>
   <div class="newRecord" id="overRecordMsg"></div>
@@ -638,7 +658,7 @@
   const POWERUP_TYPES = [
     { id: 'multiball', icon: '⚡', color: '#00f0ff', name: 'Multi-billes' },
     { id: 'laser',     icon: '🚀', color: '#ff2255', name: 'Canons Laser' },
-    { id: 'expand',    icon: '↔️', color: '#00ff88', name: 'Paddle Large' },
+    { id: 'expand',    icon: '↔️', color: '#00ff88', name: 'Raquette large' },
     { id: 'fireball',  icon: '🔥', color: '#ff8800', name: 'Bille de Feu' },
     { id: 'shield',    icon: '🛡️', color: '#3388ff', name: 'Bouclier Bas' },
     { id: 'slow',      icon: '🐌', color: '#b844ff', name: 'Ralentissement' },
@@ -651,6 +671,7 @@
   let highScore = 0;
   try { highScore = +localStorage.getItem('cassebriques.record') || 0; } catch(e){}
   recordEl.textContent = highScore;
+  let recordAtStart = highScore;
 
   let lives = 3;
   let currentLevelIdx = 0;
@@ -767,9 +788,11 @@
 
   function resetPaddleAndBall(){
     paddle.x = W / 2;
+    paddle.vx = 0;
     paddle.w = paddle.baseW;
     paddle.expandTimer = 0;
     paddle.laserTimer = 0;
+    paddle.laserShootTimer = 0;
     stuckLaunchTimer = 0;
 
     // 1 bille collée à la raquette
@@ -788,7 +811,7 @@
     if (!b || !b.stuck) return;
     b.stuck = false;
     stuckLaunchTimer = 0;
-    const speed = (380 + (currentLevelIdx + prestigeLoop * 5) * 16) * (slowTimer > 0 ? 0.72 : 1);
+    const speed = (380 + (currentLevelIdx + prestigeLoop * 5) * 16) * (slowTimer > 0 ? 0.75 : 1);
     // Légère inclinaison aléatoire ou selon déplacement du paddle
     const angle = (Math.random() * 0.4 - 0.2) + (paddle.vx !== 0 ? (paddle.vx > 0 ? 0.25 : -0.25) : 0);
     b.vx = speed * Math.sin(angle);
@@ -852,8 +875,9 @@
   }
 
   function hitBrick(brick, hitBall){
+    const fireHit = !!hitBall && fireballTimer > 0;
     if (brick.metal) {
-      if (fireballTimer > 0) {
+      if (fireHit) {
         // La boule de feu peut briser le métal !
         destroyBrick(brick, true);
       } else {
@@ -863,7 +887,7 @@
       return;
     }
 
-    if (fireballTimer > 0) {
+    if (fireHit) {
       destroyBrick(brick);
       return;
     }
@@ -885,7 +909,9 @@
     bricks.splice(idx, 1);
 
     combo++;
-    addScore(brick.points || 100, brick.x + brick.w / 2, brick.y + brick.h / 2, combo > 2);
+    if (brick.points > 0) {
+      addScore(brick.points, brick.x + brick.w / 2, brick.y + brick.h / 2, combo > 2);
+    }
     if (!silent) playSound('brick', combo);
     spawnParticles(brick.x + brick.w / 2, brick.y + brick.h / 2, brick.color, 14, 1.2);
 
@@ -976,7 +1002,7 @@
       case 'multiball':
         // Dédoubler ou tripler les billes en jeu
         const currentBalls = [...balls];
-        currentBalls.forEach(b => {
+        currentBalls.slice(0, Math.floor((12 - balls.length) / 2)).forEach(b => {
           if (b.stuck) launchBall(b);
           for (let i = 0; i < 2; i++) {
             const angleOffset = (i === 0 ? 0.35 : -0.35);
@@ -1013,13 +1039,15 @@
         break;
 
       case 'slow':
+        if (slowTimer <= 0) {
+          balls.forEach(b => {
+            if (!b.stuck) {
+              b.vx *= 0.75;
+              b.vy *= 0.75;
+            }
+          });
+        }
         slowTimer = 10;
-        balls.forEach(b => {
-          if (!b.stuck) {
-            b.vx *= 0.75;
-            b.vy *= 0.75;
-          }
-        });
         break;
 
       case 'life':
@@ -1051,7 +1079,8 @@
   }
 
   function shootLasers(){
-    if (paddle.laserTimer <= 0) return;
+    if (paddle.laserTimer <= 0 || paddle.laserShootTimer > 0 || levelClearPending) return;
+    paddle.laserShootTimer = 0.25;
     playSound('laser');
     lasers.push({ x: paddle.x - paddle.w / 2 + 10, y: paddle.y - 4, vy: -750 });
     lasers.push({ x: paddle.x + paddle.w / 2 - 10, y: paddle.y - 4, vy: -750 });
@@ -1068,6 +1097,8 @@
       }
     }
 
+    if (state !== 'play') return;
+
     if (screenShake > 0) {
       screenShake = Math.max(0, screenShake - dt * 25);
     }
@@ -1076,7 +1107,7 @@
       levelBannerTimer -= dt;
     }
 
-    // Transition de fin de niveau différée (exécutée proprement hors de la physique)
+    // La transition suspend la physique et respecte la pause.
     if (levelClearPending) {
       levelTransitionTimer -= dt;
       if (levelTransitionTimer <= 0) {
@@ -1088,16 +1119,15 @@
           winOverlay.classList.remove('hidden');
           state = 'win';
           winScoreEl.textContent = `Score final : ${score}`;
-          if (score >= highScore) {
+          if (score > recordAtStart) {
             winRecordMsg.textContent = '★ NOUVEAU RECORD ÉTABLI ! ★';
           } else {
             winRecordMsg.textContent = `Record actuel : ${highScore}`;
           }
         }
       }
+      return;
     }
-
-    if (state !== 'play') return;
 
     // Minuteurs d'effets
     if (paddle.expandTimer > 0) {
@@ -1106,14 +1136,21 @@
     }
     if (paddle.laserTimer > 0) {
       paddle.laserTimer -= dt;
-      paddle.laserShootTimer += dt;
-      if (paddle.laserShootTimer >= 0.35) {
-        paddle.laserShootTimer = 0;
-        shootLasers();
+    }
+    paddle.laserShootTimer = Math.max(0, paddle.laserShootTimer - dt);
+    if (fireballTimer > 0) fireballTimer -= dt;
+    if (slowTimer > 0) {
+      slowTimer -= dt;
+      if (slowTimer <= 0) {
+        slowTimer = 0;
+        balls.forEach(b => {
+          if (!b.stuck) {
+            b.vx /= 0.75;
+            b.vy /= 0.75;
+          }
+        });
       }
     }
-    if (fireballTimer > 0) fireballTimer -= dt;
-    if (slowTimer > 0) slowTimer -= dt;
 
     // Déplacement de la raquette
     paddle.vx = 0;
@@ -1153,37 +1190,34 @@
       }
     }
 
-    // Tir manuel si touche Espace ou tir
+    // Tir manuel si la touche Espace est maintenue
     if (keys.fire) {
       balls.forEach(b => {
         if (b && b.stuck) launchBall(b);
       });
-      if (paddle.laserTimer > 0 && paddle.laserShootTimer >= 0.2) {
-        paddle.laserShootTimer = 0;
-        shootLasers();
-      }
+      shootLasers();
     }
 
     // Gestion des Lasers
     for (let i = lasers.length - 1; i >= 0; i--) {
       const l = lasers[i];
       if (!l) continue;
+      const previousY = l.y;
       l.y += l.vy * dt;
-      if (l.y < TOP_PLAY_Y) {
-        lasers.splice(i, 1);
-        continue;
-      }
-      // Collision laser avec les briques
+      // Balayer tout le trajet du tir pour ne pas traverser une brique.
+      let target = null;
       for (let j = bricks.length - 1; j >= 0; j--) {
         const b = bricks[j];
-        if (!b) continue;
-        if (l.x >= b.x && l.x <= b.x + b.w && l.y >= b.y && l.y <= b.y + b.h) {
-          hitBrick(b, null);
-          lasers.splice(i, 1);
-          break;
+        if (l.x >= b.x && l.x <= b.x + b.w &&
+            l.y - 10 <= b.y + b.h && previousY >= b.y &&
+            (!target || b.y > target.y)) {
+          target = b;
         }
       }
+      if (target) hitBrick(target, null);
+      if (target || l.y < TOP_PLAY_Y) lasers.splice(i, 1);
     }
+    if (levelClearPending) return;
 
     // Gestion des capsules de bonus
     for (let i = powerups.length - 1; i >= 0; i--) {
@@ -1222,96 +1256,108 @@
       b.trail.unshift({ x: b.x, y: b.y });
       if (b.trail.length > 7) b.trail.pop();
 
-      b.x += b.vx * dt;
-      b.y += b.vy * dt;
+      // Des pas courts empêchent une bille rapide de franchir une brique entière.
+      const steps = Math.max(1, Math.ceil(Math.hypot(b.vx, b.vy) * dt / 5));
+      for (let step = 0; step < steps; step++) {
+        const oldX = b.x;
+        const oldY = b.y;
+        b.x += b.vx * dt / steps;
+        b.y += b.vy * dt / steps;
 
-      // Rebond murs gauche / droite
-      if (b.x - b.r < 12) {
-        b.x = 12 + b.r;
-        b.vx = Math.abs(b.vx);
-        playSound('wall');
-      } else if (b.x + b.r > W - 12) {
-        b.x = W - 12 - b.r;
-        b.vx = -Math.abs(b.vx);
-        playSound('wall');
-      }
-
-      // Rebond plafond
-      if (b.y - b.r < TOP_PLAY_Y) {
-        b.y = TOP_PLAY_Y + b.r;
-        b.vy = Math.abs(b.vy);
-        playSound('wall');
-      }
-
-      // Bouclier d'énergie en bas
-      if (shieldActive && b.y + b.r >= BOTTOM_PLAY_Y) {
-        b.y = BOTTOM_PLAY_Y - b.r;
-        b.vy = -Math.abs(b.vy);
-        shieldActive = false; // Consommé
-        playSound('paddle', 0);
-        screenShake = 6;
-        floaters.push({ text: 'BOUCLIER CONSOMMÉ !', x: W / 2, y: H - 40, vy: -30, alpha: 1, color: '#3388ff' });
-      }
-
-      // Rebond sur la raquette
-      if (b.vy > 0 &&
-          b.y + b.r >= paddle.y - paddle.h / 2 &&
-          b.y - b.r <= paddle.y + paddle.h / 2 &&
-          b.x >= paddle.x - paddle.w / 2 - 4 &&
-          b.x <= paddle.x + paddle.w / 2 + 4) {
-
-        combo = 0; // Réinitialise le multiplicateur de combo
-        updateHud();
-
-        // Calcul d'angle précis selon le point d'impact
-        const rel = (b.x - paddle.x) / (paddle.w / 2);
-        const clampedRel = Math.max(-0.92, Math.min(0.92, rel));
-        const maxAngle = Math.PI * 0.38; // Jusqu'à ~68 degrés
-        const angle = clampedRel * maxAngle;
-        const curSpeed = Math.hypot(b.vx, b.vy);
-
-        b.vx = curSpeed * Math.sin(angle);
-        b.vy = -curSpeed * Math.cos(angle);
-        b.y = paddle.y - paddle.h / 2 - b.r;
-
-        playSound('paddle', Math.abs(clampedRel));
-        spawnParticles(b.x, b.y, '#00f0ff', 5, 0.6);
-      }
-
-      // Collisions avec les briques (Circle-Rect AABB)
-      for (let j = bricks.length - 1; j >= 0; j--) {
-        const br = bricks[j];
-        if (!br) continue;
-
-        // Boîte englobante
-        const closestX = Math.max(br.x, Math.min(b.x, br.x + br.w));
-        const closestY = Math.max(br.y, Math.min(b.y, br.y + br.h));
-        const distX = b.x - closestX;
-        const distY = b.y - closestY;
-        const distSq = distX * distX + distY * distY;
-
-        if (distSq < b.r * b.r) {
-          hitBrick(br, b);
-
-          if (fireballTimer <= 0 || br.metal) {
-            // Rebond normal
-            const overlapX = (b.r) - Math.abs(distX);
-            const overlapY = (b.r) - Math.abs(distY);
-
-            if (overlapX < overlapY) {
-              b.vx = distX > 0 ? Math.abs(b.vx) : -Math.abs(b.vx);
-            } else {
-              b.vy = distY > 0 ? Math.abs(b.vy) : -Math.abs(b.vy);
-            }
-          }
-          break; // Un seul rebond par étape
+        // Rebond murs gauche / droite
+        if (b.x - b.r < 12) {
+          b.x = 12 + b.r;
+          b.vx = Math.abs(b.vx);
+          playSound('wall');
+        } else if (b.x + b.r > W - 12) {
+          b.x = W - 12 - b.r;
+          b.vx = -Math.abs(b.vx);
+          playSound('wall');
         }
+
+        // Rebond plafond
+        if (b.y - b.r < TOP_PLAY_Y) {
+          b.y = TOP_PLAY_Y + b.r;
+          b.vy = Math.abs(b.vy);
+          playSound('wall');
+        }
+
+        // Bouclier d'énergie en bas
+        if (shieldActive && b.vy > 0 && b.y + b.r >= BOTTOM_PLAY_Y && b.y - b.r < BOTTOM_PLAY_Y) {
+          b.y = BOTTOM_PLAY_Y - b.r;
+          b.vy = -Math.abs(b.vy);
+          shieldActive = false; // Consommé
+          playSound('paddle', 0);
+          screenShake = 6;
+          floaters.push({ text: 'BOUCLIER CONSOMMÉ !', x: W / 2, y: H - 40, vy: -30, alpha: 1, color: '#3388ff' });
+        }
+
+        // Rebond sur la raquette
+        if (b.vy > 0 &&
+            b.y + b.r >= paddle.y - paddle.h / 2 &&
+            b.y - b.r <= paddle.y + paddle.h / 2 &&
+            b.x >= paddle.x - paddle.w / 2 - 4 &&
+            b.x <= paddle.x + paddle.w / 2 + 4) {
+
+          combo = 0; // Réinitialise le multiplicateur de combo
+          updateHud();
+
+          // Calcul d'angle précis selon le point d'impact
+          const rel = (b.x - paddle.x) / (paddle.w / 2);
+          const clampedRel = Math.max(-0.92, Math.min(0.92, rel));
+          const maxAngle = Math.PI * 0.38; // Jusqu'à ~68 degrés
+          const angle = clampedRel * maxAngle;
+          const curSpeed = Math.hypot(b.vx, b.vy);
+
+          b.vx = curSpeed * Math.sin(angle);
+          b.vy = -curSpeed * Math.cos(angle);
+          b.y = paddle.y - paddle.h / 2 - b.r;
+
+          playSound('paddle', Math.abs(clampedRel));
+          spawnParticles(b.x, b.y, '#00f0ff', 5, 0.6);
+        }
+
+        // Collisions avec les briques (Circle-Rect AABB)
+        for (let j = bricks.length - 1; j >= 0; j--) {
+          const br = bricks[j];
+          if (!br) continue;
+
+          // Boîte englobante
+          const closestX = Math.max(br.x, Math.min(b.x, br.x + br.w));
+          const closestY = Math.max(br.y, Math.min(b.y, br.y + br.h));
+          const distX = b.x - closestX;
+          const distY = b.y - closestY;
+          const distSq = distX * distX + distY * distY;
+
+          if (distSq < b.r * b.r) {
+            hitBrick(br, b);
+
+            if (fireballTimer <= 0) {
+              // Rebond selon le côté d'arrivée, puis sortie de la brique.
+              const overlapX = (b.r) - Math.abs(distX);
+              const overlapY = (b.r) - Math.abs(distY);
+
+              if (overlapX < overlapY) {
+                const fromLeft = oldX < br.x + br.w / 2;
+                b.x = fromLeft ? br.x - b.r : br.x + br.w + b.r;
+                b.vx = fromLeft ? -Math.abs(b.vx) : Math.abs(b.vx);
+              } else {
+                const fromAbove = oldY < br.y + br.h / 2;
+                b.y = fromAbove ? br.y - b.r : br.y + br.h + b.r;
+                b.vy = fromAbove ? -Math.abs(b.vy) : Math.abs(b.vy);
+              }
+            }
+            break; // Un seul rebond par étape
+          }
+        }
+        if (levelClearPending) break;
       }
 
       // Bille perdue en bas
       if (b.y - b.r > H) {
         balls.splice(i, 1);
       }
+      if (levelClearPending) break;
     }
 
     // Si toutes les billes sont tombées (et pas en transition de fin de niveau)
@@ -1326,7 +1372,7 @@
         state = 'over';
         overOverlay.classList.remove('hidden');
         overScoreEl.textContent = `Score final : ${score}`;
-        if (score >= highScore && score > 0) {
+        if (score > recordAtStart) {
           overRecordMsg.textContent = '★ NOUVEAU RECORD ÉTABLI ! ★';
         } else {
           overRecordMsg.textContent = `Record actuel : ${highScore}`;
@@ -1677,9 +1723,13 @@
     if (state === 'play') {
       state = 'paused';
       pauseTag.classList.add('on');
+      pauseBtn.textContent = '▶';
+      pauseBtn.title = 'Reprendre [P]';
     } else {
       state = 'play';
       pauseTag.classList.remove('on');
+      pauseBtn.textContent = '⏸';
+      pauseBtn.title = 'Pause [P]';
     }
   }
   pauseBtn.addEventListener('click', togglePause);
@@ -1690,12 +1740,16 @@
     overOverlay.classList.add('hidden');
     winOverlay.classList.add('hidden');
     pauseTag.classList.remove('on');
+    pauseBtn.textContent = '⏸';
+    pauseBtn.title = 'Pause [P]';
 
     levelClearPending = false;
     levelTransitionTimer = 0;
     score = 0;
+    recordAtStart = highScore;
     lives = 3;
     prestigeLoop = 0;
+    pointerTargetX = null;
     loadLevel(0);
     state = 'play';
   }
@@ -1713,6 +1767,8 @@
 
   // Clavier
   window.addEventListener('keydown', (e) => {
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', ' '].includes(e.key)) e.preventDefault();
+    if (e.repeat && ['p', 'P', 'Escape', 'm', 'M', 'i', 'I'].includes(e.key)) return;
     unlockAudio();
     if (e.key === 'ArrowLeft' || e.key === 'q' || e.key === 'Q' || e.key === 'a' || e.key === 'A') {
       keys.left = true;
@@ -1741,6 +1797,22 @@
       keys.right = false;
     } else if (e.key === ' ' || e.key === 'ArrowUp') {
       keys.fire = false;
+    }
+  });
+
+  function releaseControls(){
+    keys.left = false;
+    keys.right = false;
+    keys.fire = false;
+  }
+  window.addEventListener('blur', () => {
+    releaseControls();
+    if (state === 'play') togglePause();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && state === 'play') {
+      releaseControls();
+      togglePause();
     }
   });
 
