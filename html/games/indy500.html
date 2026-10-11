@@ -146,7 +146,8 @@
     <div class="hint">
       Conduire : <kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> ou les flèches · <b>Manette Gamepad supportée</b><br/>
       Boîte manuelle : <kbd>Shift</kbd>/<kbd>E</kbd> monter · <kbd>Ctrl</kbd>/<kbd>A</kbd> descendre (ou RB/LB)<br/>
-      <kbd>C</kbd> caméra · <kbd>P</kbd> pause · <kbd>M</kbd> muet · <kbd>R</kbd> dégager la voiture
+      <kbd>C</kbd> caméra · <kbd>P</kbd> pause · <kbd>M</kbd> muet · <kbd>R</kbd> dégager la voiture<br/>
+      Stands : case jaune côté intérieur, juste après la ligne — arrêtez-vous dedans pour le ravitaillement
     </div>
   </div>
 </div>
@@ -245,6 +246,16 @@
     return m + ':' + (s < 10 ? '0' : '') + s.toFixed(2);
   };
   const fmtGap = t => (!isFinite(t) ? '—' : (t >= 0 ? '+' : '-') + Math.abs(t).toFixed(1) + 's');
+
+  // localStorage peut être indisponible (navigation privée, stockage bloqué) :
+  // le jeu doit continuer à fonctionner sans records.
+  const stockage = {
+    lire(cle, defaut){
+      try { const v = localStorage.getItem(cle); return v === null ? defaut : v; } catch(e){ return defaut; }
+    },
+    nombre(cle, defaut){ const v = +this.lire(cle, NaN); return isFinite(v) ? v : defaut; },
+    ecrire(cle, val){ try { localStorage.setItem(cle, String(val)); } catch(e){} }
+  };
 
   // ------------------------------------------------------------------
   //  Références DOM
@@ -439,6 +450,19 @@
   const camera = renderer ? new THREE.PerspectiveCamera(72, 1, 0.15, 7000) : null;
   const GRASS_Y = -0.05;
 
+  // Texture issue d'un canvas 2D. Les canvas sont en sRGB : sans `colorSpace`,
+  // Three.js les traite comme linéaires et le rendu devient pâle et délavé.
+  function texCanvas(cv, repX, repY){
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace;
+    if (repX){
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(repX, repY || repX);
+    }
+    t.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+    return t;
+  }
+
   // Rétroviseurs : une petite caméra arrière rend la scène dans une texture
   // basse résolution, réutilisée par les deux miroirs.
   let miroirRT = null, cameraMiroir = null, miroirAcc = 0;
@@ -449,83 +473,82 @@
     cameraMiroir = new THREE.PerspectiveCamera(34, 4, 0.3, 2200);
     renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));
     scene.fog = new THREE.Fog(0xcfe0ee, 170, 1150);
-    scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x3c5a34, 0.85));
-    const soleil = new THREE.DirectionalLight(0xfff0d0, 1.05);
+    scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x4a5a3a, 0.62));
+    const soleil = new THREE.DirectionalLight(0xfff0d0, 0.95);
     soleil.position.set(-700, 900, -500);
     scene.add(soleil);
-    const ambiante = new THREE.AmbientLight(0xffffff, 0.18);
+    const ambiante = new THREE.AmbientLight(0xffffff, 0.08);
     scene.add(ambiante);
   }
 
-  // ---------- Ciel dégradé + nuages rétro + soleil éclatant ----------
+  // ---------- Ciel dégradé + cumulus + soleil éclatant ----------
+  let cielMesh = null, dirigeable = null, dirigeableAngle = 0;
   function construireCiel(){
     const cv = document.createElement('canvas');
     cv.width = 1024; cv.height = 512;
     const c = cv.getContext('2d');
+    const hasard = mulberry32(1989);
 
-    // Dégradé céleste rétro (du zénith profond à l'horizon lumineux)
-    const g = c.createLinearGradient(0, 0, 0, 512);
-    g.addColorStop(0.00, '#10396c');
-    g.addColorStop(0.28, '#2b6ea6');
-    g.addColorStop(0.55, '#68a8dc');
-    g.addColorStop(0.78, '#b2d5ed');
-    g.addColorStop(0.88, '#e5f0f8');
-    g.addColorStop(1.00, '#dbe7ee');
-    c.fillStyle = g; c.fillRect(0, 0, 1024, 512);
+    // Du zénith profond à l'horizon brumeux (la couleur de l'horizon = celle du brouillard).
+    const g = c.createLinearGradient(0, 0, 0, 256);
+    g.addColorStop(0.00, '#1c559f');
+    g.addColorStop(0.30, '#3a80c6');
+    g.addColorStop(0.62, '#74add9');
+    g.addColorStop(0.86, '#b9d6ea');
+    g.addColorStop(1.00, '#cfe0ee');
+    c.fillStyle = g; c.fillRect(0, 0, 1024, 256);
+    c.fillStyle = '#cfe0ee'; c.fillRect(0, 256, 1024, 256);
 
-    // Strates de nuages stylisés rétro (cirrus vaporeux et bancs de stratus)
-    function dessinerNuage(cx, cy, rx, ry, alpha){
-      c.save();
-      const ng = c.createRadialGradient(cx, cy, 0, cx, cy, rx);
-      ng.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);
-      ng.addColorStop(0.45, `rgba(240, 248, 255, ${alpha * 0.72})`);
-      ng.addColorStop(0.8, `rgba(220, 235, 250, ${alpha * 0.28})`);
-      ng.addColorStop(1, 'rgba(210, 230, 245, 0)');
-      c.fillStyle = ng;
-      c.beginPath();
-      c.ellipse(cx, cy, rx, ry, 0, 0, TAU);
-      c.fill();
-      c.restore();
+    // Cirrus fins et étirés en altitude.
+    for (let i = 0; i < 16; i++){
+      const x = hasard() * 1024, y = 30 + hasard() * 60, l = 90 + hasard() * 150;
+      const cg = c.createLinearGradient(x - l, y, x + l, y);
+      cg.addColorStop(0, 'rgba(255,255,255,0)'); cg.addColorStop(0.5, 'rgba(255,255,255,.34)'); cg.addColorStop(1, 'rgba(255,255,255,0)');
+      c.fillStyle = cg;
+      c.beginPath(); c.ellipse(x, y, l, 3 + hasard() * 4, (hasard() - 0.5) * 0.12, 0, TAU); c.fill();
     }
 
-    // Nuages d'altitude (fins et étirés)
-    for (let x = 40; x < 1024; x += 170){
-      dessinerNuage(x + Math.sin(x) * 35, 88 + Math.cos(x) * 20, 115, 18, 0.45);
-      dessinerNuage(x + 85, 135 + Math.sin(x * 2) * 18, 135, 22, 0.52);
+    // Cumulus de beau temps : amas de bulles lumineuses sur un socle plat un peu
+    // gris. Plus petits et plus serrés près de l'horizon (perspective).
+    function cumulus(cx, cy, taille){
+      const bulles = 9 + Math.floor(hasard() * 8);
+      const parts = [];
+      for (let i = 0; i < bulles; i++){
+        const dx = (hasard() - 0.5) * taille * 1.9, dy = -Math.abs(hasard()) * taille * 0.42;
+        parts.push([cx + dx, cy + dy, taille * (0.26 + hasard() * 0.34) * (1 - Math.abs(dx) / (taille * 2.2))]);
+      }
+      // dessiné aussi décalé d'un tour de texture : pas de couture verticale
+      for (const decal of [-1024, 0, 1024]){
+        for (const [x0, y, r] of parts){
+          const x = x0 + decal;
+          const ng = c.createRadialGradient(x - r * 0.2, y - r * 0.3, r * 0.1, x, y, r);
+          ng.addColorStop(0, 'rgba(255,255,255,.97)');
+          ng.addColorStop(0.55, 'rgba(240,246,251,.88)');
+          ng.addColorStop(0.84, 'rgba(214,226,240,.5)');
+          ng.addColorStop(1, 'rgba(206,220,236,0)');
+          c.fillStyle = ng; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
+        }
+        const sg = c.createLinearGradient(0, cy - taille * 0.12, 0, cy + taille * 0.16);
+        sg.addColorStop(0, 'rgba(150,170,196,0)'); sg.addColorStop(1, 'rgba(140,160,190,.34)');
+        c.fillStyle = sg;
+        c.beginPath(); c.ellipse(cx + decal, cy, taille * 1.1, taille * 0.16, 0, 0, TAU); c.fill();
+      }
     }
-
-    // Bancs de cumulus / stratus vers le milieu du ciel
-    for (let x = 20; x < 1024; x += 125){
-      dessinerNuage(x, 235 + Math.sin(x * 3) * 18, 95, 28, 0.65);
-      dessinerNuage(x + 48, 248 + Math.cos(x * 2) * 16, 120, 34, 0.75);
-      dessinerNuage(x + 92, 232 + Math.sin(x * 4) * 20, 85, 25, 0.6);
+    for (let i = 0; i < 26; i++){
+      const y = 130 + hasard() * 118;                       // 130 (haut) … 248 (près de l'horizon)
+      const t = (y - 130) / 118;
+      cumulus(hasard() * 1024, y, 60 - t * 34 + hasard() * 14);
     }
-
-    // Nuages bas à l'horizon
-    for (let x = 0; x < 1024; x += 90){
-      dessinerNuage(x + 30, 345 + Math.sin(x) * 10, 110, 26, 0.48);
-    }
-
-    // Fine silhouette végétale/arborée lointaine au ras de l'horizon
-    const hY = 445;
-    c.fillStyle = 'rgba(45, 82, 48, 0.28)';
-    c.beginPath();
-    c.moveTo(0, 512);
-    for (let x = 0; x <= 1024; x += 16){
-      const ondulation = Math.sin(x * 0.02) * 6 + Math.cos(x * 0.07) * 4;
-      c.lineTo(x, hY + ondulation);
-    }
-    c.lineTo(1024, 512);
-    c.closePath();
-    c.fill();
 
     const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
     tex.wrapS = THREE.RepeatWrapping;
     const ciel = new THREE.Mesh(
       new THREE.SphereGeometry(4200, 28, 16),
       new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false })
     );
     scene.add(ciel);
+    cielMesh = ciel;
 
     // Disque solaire éclatant avec double couronne radiante
     const soleilGroupe = new THREE.Group();
@@ -550,32 +573,75 @@
   }
 
   // ---------- Sol ----------
+  // Herbe : plaques douces de densité variable + brins fins (raccord sur les bords).
   function texturePelouse(){
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 1024;
+    const c = cv.getContext('2d');
+    c.fillStyle = '#41762f'; c.fillRect(0, 0, 1024, 1024);
+    const hasard = mulberry32(500);
+    for (let i = 0; i < 60; i++){
+      const x = hasard() * 1024, y = hasard() * 1024, r = 52 + hasard() * 160;
+      const teinte = hasard() < 0.5 ? '96,150,64' : '22,58,24';
+      for (const dx of [-1024, 0, 1024]) for (const dy of [-1024, 0, 1024]){
+        const g = c.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
+        g.addColorStop(0, 'rgba(' + teinte + ',0.13)');
+        g.addColorStop(1, 'rgba(' + teinte + ',0)');
+        c.fillStyle = g; c.fillRect(x + dx - r, y + dy - r, 2 * r, 2 * r);
+      }
+    }
+    const tons = ['#376b2c', '#4a8236', '#56903c', '#2f6228', '#62893f', '#3d7530', '#6b9245'];
+    for (let i = 0; i < 110000; i++){
+      c.fillStyle = tons[Math.floor(hasard() * tons.length)];
+      c.fillRect(Math.floor(hasard() * 1024), Math.floor(hasard() * 1024), 1, 2 + Math.floor(hasard() * 4));
+    }
+    // quelques touffes sèches et trèfles clairs
+    for (let i = 0; i < 700; i++){
+      c.fillStyle = hasard() < 0.6 ? 'rgba(150,150,80,.22)' : 'rgba(210,220,150,.18)';
+      c.fillRect(hasard() * 1024, hasard() * 1024, 2 + hasard() * 4, 2 + hasard() * 4);
+    }
+    return texCanvas(cv, 140);
+  }
+
+  // Herbe tondue : bandes claires/sombres parallèles à la piste (fuyantes, elles
+  // renforcent la sensation de vitesse). 1 répétition = 24 m en travers.
+  function textureTonte(){
     const cv = document.createElement('canvas');
     cv.width = cv.height = 256;
     const c = cv.getContext('2d');
-    c.fillStyle = '#477d39'; c.fillRect(0, 0, 256, 256);
-    let graine = 500;
-    const hasard = () => ((graine = (1664525 * graine + 1013904223) >>> 0) / 4294967296);
-    const tons = ['#3d7133', '#4d833d', '#5b8b42', '#346b30', '#66834a'];
-    for (let i = 0; i < 9500; i++){
-      c.fillStyle = tons[Math.floor(hasard() * tons.length)];
-      c.fillRect(hasard() * 256, hasard() * 256, 1 + hasard() * 4, 1 + hasard() * 3);
+    const hasard = mulberry32(77);
+    c.fillStyle = '#457d31'; c.fillRect(0, 0, 256, 128);
+    c.fillStyle = '#3c722c'; c.fillRect(0, 128, 256, 128);
+    const clairs = ['#538c39', '#4d8735', '#5a9140'], sombres = ['#356a27', '#39702a', '#3f7530'];
+    for (let i = 0; i < 9000; i++){
+      const y = Math.floor(hasard() * 256);
+      const t = y < 128 ? clairs : sombres;
+      c.fillStyle = t[Math.floor(hasard() * 3)];
+      c.fillRect(Math.floor(hasard() * 256), y, 1, 1 + Math.floor(hasard() * 3));
     }
-    const tex = new THREE.CanvasTexture(cv);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(90, 90);
-    tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
-    return tex;
+    // fondu doux à la jonction des bandes
+    const g = c.createLinearGradient(0, 118, 0, 138);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.5, 'rgba(20,50,20,.10)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g; c.fillRect(0, 118, 256, 20);
+    return texCanvas(cv, 1);
   }
 
   function construireSol(){
     // Sol subdivisé : de petits triangles évitent les erreurs de profondeur
     // des très grandes faces (le sol ne doit jamais passer devant la piste).
-    const sol = new THREE.Mesh(
-      new THREE.PlaneGeometry(9000, 9000, 64, 64),
-      new THREE.MeshLambertMaterial({ map: texturePelouse() })
-    );
+    const geo = new THREE.PlaneGeometry(9000, 9000, 64, 64);
+    // Variations de teinte à grande échelle (couleurs de sommets) : casse la
+    // répétition de la texture au loin.
+    const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++){
+      const x = pos.getX(i), y = pos.getY(i);
+      const n = 0.5 + 0.25 * Math.sin(x * 0.0021 + 1.3) * Math.cos(y * 0.0026) + 0.25 * Math.sin(x * 0.0067 + y * 0.0049);
+      col[i * 3]     = 0.80 + 0.30 * n;
+      col[i * 3 + 1] = 0.88 + 0.20 * n;
+      col[i * 3 + 2] = 0.78 + 0.16 * n;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const sol = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: texturePelouse(), vertexColors: true }));
     sol.rotation.x = -PI / 2;
     sol.position.y = GRASS_Y;
     scene.add(sol);
@@ -609,10 +675,7 @@
       c.fillStyle = hasard() < 0.5 ? 'rgba(18,19,21,.12)' : 'rgba(225,225,220,.08)';
       c.fillRect(hasard() * 256, hasard() * 256, 2 + hasard() * 11, 0.5 + hasard() * 2);
     }
-    const tex = new THREE.CanvasTexture(cv);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
-    return tex;
+    return texCanvas(cv, 1);
   }
 
   // Construit un ruban le long de la piste entre deux décalages latéraux.
@@ -822,11 +885,111 @@
     }
   }
 
+  // ---------- Terrain autour de la piste ----------
+  // Ruban générique le long de la piste. `f(i)` renvoie [lat0, y0, lat1, y1]
+  // pour l'échantillon i, ou null pour laisser un trou. `uvU` / `uvV` : mètres
+  // par répétition de texture le long / en travers de la piste.
+  // `fondu` = [alpha au bord lat0, alpha au bord lat1] : bord estompé (matériau
+  // à `vertexColors` et `transparent`).
+  function rubanLibre(f, uvU, uvV, pas, i0, i1, fondu){
+    const pos = [], idx = [], uv = [], col = [], p = {};
+    pas = pas || 2; i0 = i0 || 0; if (i1 === undefined) i1 = N;
+    let precedent = -1;
+    for (let i = i0; ; i += pas){
+      const ic = Math.min(i, i1);
+      const d = f(((ic % N) + N) % N);
+      if (!d){ precedent = -1; }
+      else {
+        trackAt(ic * PAS, p);
+        const courant = pos.length / 3;
+        pos.push(p.x - p.dz * d[0], d[1], p.z + p.dx * d[0]);
+        pos.push(p.x - p.dz * d[2], d[3], p.z + p.dx * d[2]);
+        const u = ic * PAS / uvU;
+        uv.push(u, d[0] / uvV, u, d[2] / uvV);
+        if (fondu) col.push(1, 1, 1, fondu[0], 1, 1, 1, fondu[1]);
+        if (precedent >= 0) idx.push(precedent, precedent + 1, courant + 1, precedent, courant + 1, courant);
+        precedent = courant;
+      }
+      if (ic >= i1) break;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    if (fondu) geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  // Les couches posées à plat sur le sol ou la piste gagnent la profondeur :
+  // pas de scintillement (z-fighting) à distance.
+  const decalage = (mat, n) => {
+    mat.polygonOffset = true; mat.polygonOffsetFactor = -n; mat.polygonOffsetUnits = -n;
+    return mat;
+  };
+
+  function construireTerrain(){
+    const base = i => LARGEUR * Math.sin(PBANK[i]);
+    const tonte = decalage(new THREE.MeshLambertMaterial({ map: textureTonte(), side: THREE.DoubleSide }), 2);
+    // Bords estompés : la tonte se fond dans l'herbe haute, sans arête franche.
+    const tonteFondue = decalage(new THREE.MeshLambertMaterial({ map: tonte.map, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide }), 2);
+    // Herbe tondue de l'infield (à l'intérieur du mur intérieur).
+    scene.add(new THREE.Mesh(rubanLibre(i => [PLIN[i] - 0.05, 0, PLIN[i] - 60, 0], 24, 24, 3, 0, N, [1, 0]), tonteFondue));
+    // Talus extérieur des virages relevés : raccorde le haut du mur au sol.
+    scene.add(new THREE.Mesh(rubanLibre(i => [PLOUT[i] + 0.35, base(i), PLOUT[i] + 14, 0], 24, 24, 2), tonte));
+    // Pelouse plate au-delà du talus.
+    scene.add(new THREE.Mesh(rubanLibre(i => [PLOUT[i] + 14, 0, PLOUT[i] + 90, 0], 24, 24, 4, 0, N, [1, 0]), tonteFondue));
+    // Bande bitumée entre la ligne blanche et les murs (pas de vide sous le mur).
+    const matVerge = decalage(new THREE.MeshLambertMaterial({ map: matRoute.map, color: 0xb8b8b4, side: THREE.DoubleSide }), 2);
+    scene.add(new THREE.Mesh(rubanLibre(i => [DEMI, base(i), PLOUT[i], base(i)], 18, 16, 2), matVerge));
+    const condApron = i => PLIN[i] < -(DEMI + MUR + 0.5);
+    scene.add(new THREE.Mesh(rubanLibre(i => condApron(i) ? null : [-DEMI - MUR, 0.004, -DEMI, 0.004], 18, 16, 2), matVerge));
+  }
+
   // ---------- Murs, grillage, tribunes ----------
+  // Béton peint en blanc : joints de dalles tous les 6 m, salissures, traces de
+  // pneus et lettrage. Une répétition = 48 m de mur sur 1,15 m de haut.
+  function textureMur(){
+    const cv = document.createElement('canvas');
+    cv.width = 1024; cv.height = 64;
+    const c = cv.getContext('2d');
+    const hasard = mulberry32(1911);
+    c.fillStyle = '#e9e9e3'; c.fillRect(0, 0, 1024, 64);
+    for (let i = 0; i < 2600; i++){
+      c.fillStyle = hasard() < 0.5 ? 'rgba(120,118,108,.10)' : 'rgba(255,255,255,.22)';
+      c.fillRect(hasard() * 1024, hasard() * 64, 1 + hasard() * 3, 1);
+    }
+    // souillure du bas (poussière, gomme projetée)
+    const g = c.createLinearGradient(0, 24, 0, 64);
+    g.addColorStop(0, 'rgba(70,66,58,0)'); g.addColorStop(1, 'rgba(70,66,58,.42)');
+    c.fillStyle = g; c.fillRect(0, 24, 1024, 40);
+    // joints
+    for (let x = 0; x < 1024; x += 128){
+      c.fillStyle = 'rgba(60,60,58,.55)'; c.fillRect(x, 0, 2, 64);
+      c.fillStyle = 'rgba(255,255,255,.35)'; c.fillRect(x + 2, 0, 1, 64);
+    }
+    // lettrage peint
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillStyle = '#b3151b'; c.font = 'bold 34px Arial,Helvetica,sans-serif';
+    c.fillText('INDIANAPOLIS 500', 384, 30);
+    c.fillStyle = '#17346f'; c.font = 'bold 30px Arial,Helvetica,sans-serif';
+    c.fillText('MOTOR SPEEDWAY', 832, 31);
+    c.fillStyle = '#17346f'; c.fillRect(640, 52, 384, 3);
+    c.fillStyle = '#b3151b'; c.fillRect(192, 52, 384, 3);
+    // traces de frottement et de pneus
+    for (let i = 0; i < 46; i++){
+      const x = hasard() * 1024, y = 14 + hasard() * 44, l = 14 + hasard() * 60;
+      c.fillStyle = hasard() < 0.75 ? 'rgba(30,30,32,' + (0.10 + hasard() * 0.22) + ')' : 'rgba(150,25,25,.22)';
+      c.beginPath(); c.moveTo(x, y); c.lineTo(x + l, y - 2 - hasard() * 4); c.lineTo(x + l, y + 1 + hasard() * 3); c.lineTo(x, y + 2); c.fill();
+    }
+    return texCanvas(cv, 1);
+  }
+
   function construireMurs(){
+    matMur.map = textureMur(); matMur.color.setHex(0xffffff); matMur.needsUpdate = true;
     // murs (extérieur et intérieur) : quads verticaux le long de la piste
-    function mur(latArr, baseArr, hauteur){
-      const pos = [], idx = [];
+    function mur(latArr, baseArr, hauteur, texturer, sens){
+      const pos = [], idx = [], uv = [];
       const step = 2, nb = Math.floor(N / step);
       const p = {};
       for (let k = 0; k <= nb; k++){
@@ -835,6 +998,7 @@
         const lat = latArr[i], base = baseArr[i];
         pos.push(p.x - p.dz * lat, base, p.z + p.dx * lat);
         pos.push(p.x - p.dz * lat, base + hauteur, p.z + p.dx * lat);
+        if (texturer){ const u = (sens || 1) * k * step * PAS / 48; uv.push(u, 0, u, 1); }
         if (k > 0){
           const a = (k - 1) * 2, b = a + 1, c = k * 2, d = c + 1;
           idx.push(a, c, b, b, c, d);
@@ -842,6 +1006,7 @@
       }
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      if (texturer) geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
       geo.setIndex(idx);
       geo.computeVertexNormals();
       return geo;
@@ -849,8 +1014,8 @@
     const baseExt = new Float32Array(N);
     for (let i = 0; i < N; i++) baseExt[i] = LARGEUR * Math.sin(PBANK[i]);
     const baseInt = new Float32Array(N);
-    scene.add(new THREE.Mesh(mur(PLOUT, baseExt, 1.15), matMur));
-    scene.add(new THREE.Mesh(mur(PLIN, baseInt, 1.15), matMur));
+    scene.add(new THREE.Mesh(mur(PLOUT, baseExt, 1.15, true, -1), matMur));
+    scene.add(new THREE.Mesh(mur(PLIN, baseInt, 1.15, true), matMur));
     // liseré sombre au sommet des murs
     scene.add(new THREE.Mesh(mur(PLOUT, baseExt.map(v => v + 1.05), 0.1), matMurHaut));
     scene.add(new THREE.Mesh(mur(PLIN, baseInt.map(v => v + 1.05), 0.1), matMurHaut));
@@ -914,65 +1079,216 @@
     scene.add(poteaux);
   }
 
-  function textureFoule(){
+  // Spectateurs : palette commune aux assises et aux contremarches.
+  const HAUTS = ['#d8d4c8', '#d8d4c8', '#f0ede4', '#f0ede4', '#25272b', '#3a4a63', '#4b5563', '#7d8a99', '#a9b0b8', '#b8302e', '#2a5aa0', '#c9a63c', '#3f8a55', '#c8722c'];
+  const PEAUX = ['#e2b892', '#c98f65', '#f0cba8', '#9b6a45', '#6d4630'];
+  const CASQUES = ['#b8302e', '#e8e6de', '#2a5aa0', '#c9a63c', '#1f1f22'];
+
+  // Assises vues de dessus : bancs en aluminium, têtes, épaules, casquettes et un
+  // escalier tous les 24 m. 512 × 32 px = 24 m × 0,9 m.
+  function textureAssises(){
     const cv = document.createElement('canvas');
-    cv.width = 256; cv.height = 32;
+    cv.width = 512; cv.height = 32;
     const c = cv.getContext('2d');
-    c.fillStyle = '#2b2f36'; c.fillRect(0, 0, 256, 32);
-    const cols = ['#e8d5b0', '#d94f4f', '#4f7fd9', '#e8c84f', '#8fd94f', '#d9d9d9', '#c94fd9', '#4fd9c0', '#e88a4f'];
-    for (let i = 0; i < 2600; i++){
-      c.fillStyle = cols[(Math.random() * cols.length) | 0];
-      c.fillRect((Math.random() * 256) | 0, (Math.random() * 32) | 0, 2, 2);
+    const hasard = mulberry32(500);
+    c.fillStyle = '#8c939b'; c.fillRect(0, 0, 512, 32);
+    c.fillStyle = 'rgba(255,255,255,.18)'; c.fillRect(0, 24, 512, 1);
+    const pas = 512 / 48;
+    for (let k = 0; k < 48; k++){
+      const x = k * pas;
+      if (k < 3){ c.fillStyle = '#bdbab0'; c.fillRect(x, 0, pas, 32); continue; }   // escalier
+      if (hasard() < 0.14) continue;                                                     // place vide
+      const cx = x + pas / 2 + (hasard() - 0.5) * 1.2;
+      c.fillStyle = HAUTS[Math.floor(hasard() * HAUTS.length)];
+      c.fillRect(cx - 5, 12, 10, 19);                                                    // épaules
+      c.fillStyle = 'rgba(0,0,0,.22)'; c.fillRect(cx - 5, 27, 10, 4);
+      c.fillStyle = PEAUX[Math.floor(hasard() * PEAUX.length)];
+      c.beginPath(); c.arc(cx, 10, 4, 0, TAU); c.fill();                                 // tête
+      if (hasard() < 0.34){
+        c.fillStyle = CASQUES[Math.floor(hasard() * CASQUES.length)];
+        c.beginPath(); c.arc(cx, 9, 4.3, PI, TAU); c.fill();
+        c.fillRect(cx - 4.3, 8.6, 8.6, 1.6);
+      }
     }
-    const tex = new THREE.CanvasTexture(cv);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(70, 1);
-    return tex;
+    return texCanvas(cv, 1);
+  }
+
+  // Contremarches vues de face : les spectateurs assis (tête, buste) devant leur
+  // banc. 512 × 32 px = 24 m × 0,42 m ; les rangées se superposent donc bien.
+  function textureContremarches(){
+    const cv = document.createElement('canvas');
+    cv.width = 512; cv.height = 32;
+    const c = cv.getContext('2d');
+    const hasard = mulberry32(501);
+    c.fillStyle = '#7f8790'; c.fillRect(0, 0, 512, 32);
+    const pas = 512 / 48;
+    for (let k = 0; k < 48; k++){
+      const x = k * pas;
+      if (k < 3){ c.fillStyle = '#a9a69d'; c.fillRect(x, 0, pas, 32); c.fillStyle = 'rgba(0,0,0,.25)'; c.fillRect(x, 0, pas, 3); continue; }
+      if (hasard() < 0.14) continue;
+      const cx = x + pas / 2 + (hasard() - 0.5) * 1.2;
+      c.fillStyle = HAUTS[Math.floor(hasard() * HAUTS.length)];
+      c.beginPath(); c.moveTo(cx - 5.4, 32); c.lineTo(cx - 4.6, 15); c.quadraticCurveTo(cx, 11, cx + 4.6, 15); c.lineTo(cx + 5.4, 32); c.fill();
+      c.fillStyle = PEAUX[Math.floor(hasard() * PEAUX.length)];
+      c.beginPath(); c.arc(cx, 8.4, 4, 0, TAU); c.fill();
+      if (hasard() < 0.34){
+        c.fillStyle = CASQUES[Math.floor(hasard() * CASQUES.length)];
+        c.beginPath(); c.arc(cx, 7.4, 4.3, PI, TAU); c.fill();
+        c.fillRect(cx - 5.4, 7.2, 10, 1.6);
+      }
+    }
+    const g = c.createLinearGradient(0, 0, 0, 32);              // ombre portée par l'assise supérieure
+    g.addColorStop(0, 'rgba(0,0,0,.30)'); g.addColorStop(0.35, 'rgba(0,0,0,0)');
+    c.fillStyle = g; c.fillRect(0, 0, 512, 32);
+    return texCanvas(cv, 1);
+  }
+
+  // Façade de bâtiment : bandeau de fenêtres sur un mur uni. Un module = 8 m × 4 m.
+  function textureFacade(mur, vitre){
+    const cv = document.createElement('canvas');
+    cv.width = 256; cv.height = 128;
+    const c = cv.getContext('2d');
+    c.fillStyle = mur; c.fillRect(0, 0, 256, 128);
+    for (let i = 0; i < 700; i++){
+      c.fillStyle = Math.random() < 0.5 ? 'rgba(0,0,0,.05)' : 'rgba(255,255,255,.06)';
+      c.fillRect(Math.random() * 256, Math.random() * 128, 2, 2);
+    }
+    for (let k = 0; k < 2; k++){
+      const x = 16 + k * 128;
+      const g = c.createLinearGradient(0, 30, 0, 96);
+      g.addColorStop(0, vitre); g.addColorStop(1, '#0d1a26');
+      c.fillStyle = g; c.fillRect(x, 30, 96, 60);
+      c.fillStyle = 'rgba(255,255,255,.16)';
+      c.beginPath(); c.moveTo(x + 6, 90); c.lineTo(x + 34, 30); c.lineTo(x + 52, 30); c.lineTo(x + 24, 90); c.fill();
+      c.fillStyle = 'rgba(20,24,28,.85)'; c.fillRect(x + 47, 30, 2, 60);
+      c.fillStyle = 'rgba(255,255,255,.35)'; c.fillRect(x - 2, 90, 100, 3);            // appui
+    }
+    c.fillStyle = 'rgba(0,0,0,.18)'; c.fillRect(0, 118, 256, 10);                      // soubassement
+    return texCanvas(cv, 1);
+  }
+
+  // Boîte texturée (fenêtres sur les 4 faces latérales, toit uni).
+  function boiteFacade(l, h, p, mur, vitre, couleurToit){
+    const base = textureFacade(mur, vitre);
+    const face = w => {
+      const t = base.clone(); t.needsUpdate = true;
+      t.repeat.set(Math.max(1, Math.round(w / 8)), Math.max(1, Math.round(h / 4)));
+      return new THREE.MeshLambertMaterial({ map: t });
+    };
+    const long = face(l), court = face(p);
+    const toit = new THREE.MeshLambertMaterial({ color: couleurToit });
+    return new THREE.Mesh(new THREE.BoxGeometry(l, h, p), [court, court, toit, toit, long, long]);
+  }
+
+  // Extrusion d'un profil de gradins le long de la piste (côté extérieur).
+  // profil : segments [lat0, y0, lat1, y1, groupe] — lat relatif au mur extérieur ;
+  // groupe 0 = assises, 1 = contremarches, 2 = béton uni (mur arrière, flancs).
+  function extruderGradins(profil, i0, i1, groupe, materiau){
+    const pos = [], uv = [], col = [], idx = [], p = {};
+    const echs = [];
+    for (let i = i0; ; ){
+      const ic = Math.min(i, i1);
+      echs.push(ic);
+      if (ic >= i1) break;
+      i += (PCURV[ic % N] !== 0 || PCURV[(ic + 8) % N] !== 0) ? 4 : 12;
+    }
+    const segs = profil.filter(sg => sg[4] === groupe), S = segs.length;
+    const teintes = [[1, 1, 1], [1, 0.9, 0.82], [0.86, 0.93, 1.05], [1, 0.97, 0.86], [0.92, 0.9, 1]];
+    const point = (lat, y) => { pos.push(p.x - p.dz * (p.off + lat), y, p.z + p.dx * (p.off + lat)); };
+    for (const ic of echs){
+      trackAt(ic * PAS, p);
+      p.off = PLOUT[((ic % N) + N) % N];
+      const along = ic * PAS, u = along / 24;
+      const t = teintes[(Math.floor(along / 24) * 7) % 5];
+      for (const sg of segs){
+        point(sg[0], sg[1]); point(sg[2], sg[3]);
+        if (groupe === 0) uv.push(u, 0, u, 1); else uv.push(u, sg[1] / 0.42, u, sg[3] / 0.42);
+        col.push(t[0], t[1], t[2], t[0], t[1], t[2]);
+      }
+    }
+    for (let k = 1; k < echs.length; k++){
+      for (let sIdx = 0; sIdx < S; sIdx++){
+        const a = (k - 1) * S * 2 + sIdx * 2, b = k * S * 2 + sIdx * 2;
+        idx.push(a, a + 1, b + 1, a, b + 1, b);
+      }
+    }
+    if (groupe === 2){
+      // flancs : un rideau sous chaque assise, aux deux extrémités
+      for (const ic of [i0, i1]){
+        trackAt(ic * PAS, p);
+        p.off = PLOUT[((ic % N) + N) % N];
+        for (const sg of profil){
+          if (sg[4] !== 0) continue;
+          const v = pos.length / 3;
+          point(sg[0], 0); point(sg[2], 0); point(sg[2], sg[3]); point(sg[0], sg[1]);
+          for (let k = 0; k < 4; k++){ uv.push(0, 0); col.push(1, 1, 1); }
+          idx.push(v, v + 1, v + 2, v, v + 2, v + 3);
+        }
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    return new THREE.Mesh(geo, materiau);
+  }
+
+  function profilGradins(nb, debut){
+    const t = 0.9, h = 0.42, seg = [[debut, 0, debut, h, 1]];
+    for (let r = 0; r < nb; r++){
+      const l = debut + r * t, y = (r + 1) * h;
+      seg.push([l, y, l + t, y, 0]);
+      if (r < nb - 1) seg.push([l + t, y, l + t, y + h, 1]);
+    }
+    seg.push([debut + nb * t, nb * h, debut + nb * t, 0, 2]);
+    return seg;
   }
 
   function construireTribunes(){
-    const tex = textureFoule();
-    const matStructure = new THREE.MeshLambertMaterial({ color: 0x6f7780 });
-    const matFoule = new THREE.MeshBasicMaterial({ map: tex });
+    const matAssise = new THREE.MeshLambertMaterial({ map: textureAssises(), vertexColors: true, side: THREE.DoubleSide });
+    const matMarche = new THREE.MeshLambertMaterial({ map: textureContremarches(), vertexColors: true, side: THREE.DoubleSide });
+    const matBeton = new THREE.MeshLambertMaterial({ color: 0xb4b5b0, vertexColors: true, side: THREE.DoubleSide });
     const groupe = new THREE.Group();
-    for (let rang = 0; rang < 5; rang++){
-      const y = rang * 1.7 + 0.85, z = 302 + rang * 9;
-      const structure = new THREE.Mesh(new THREE.BoxGeometry(1050, 1.7, 9), matStructure);
-      structure.position.set(0, y - 0.85, z);
-      groupe.add(structure);
-      const foule = new THREE.Mesh(new THREE.PlaneGeometry(1050, 8.6), matFoule);
-      foule.rotation.x = -PI / 2;
-      foule.position.set(0, y + 0.02, z);
-      groupe.add(foule);
+    const demi = Math.round(560 / PAS);                    // la grande tribune couvre |x| < 560 m
+    const ranges = [
+      { profil: profilGradins(28, 12), i0: N - demi, i1: N + demi },       // tribune principale
+      { profil: profilGradins(16, 16), i0: demi, i1: N - demi }            // gradins des virages et de la ligne opposée
+    ];
+    for (const r of ranges){
+      groupe.add(extruderGradins(r.profil, r.i0, r.i1, 0, matAssise));
+      groupe.add(extruderGradins(r.profil, r.i0, r.i1, 1, matMarche));
+      groupe.add(extruderGradins(r.profil, r.i0, r.i1, 2, matBeton));
     }
-    // Toit, charpente et piliers de la tribune de la ligne droite principale.
-    const toit = new THREE.Mesh(new THREE.BoxGeometry(1080, 0.7, 53), new THREE.MeshLambertMaterial({ color: 0xb9bec1 }));
-    toit.position.set(0, 11.7, 329);
-    toit.rotation.x = -0.07;
-    groupe.add(toit);
-    const piliers = new THREE.InstancedMesh(new THREE.BoxGeometry(0.55, 11, 0.55), matStructure, 25);
-    const dummy = new THREE.Object3D();
-    for (let i = 0; i < 25; i++){
-      dummy.position.set(-528 + i * 44, 5.5, 351);
-      dummy.updateMatrix();
-      piliers.setMatrixAt(i, dummy.matrix);
-    }
-    groupe.add(piliers);
 
-    // Gradins plus modestes à l'extérieur de la ligne droite opposée.
-    for (let rang = 0; rang < 3; rang++){
-      const z = -305 - rang * 8, y = rang * 1.45 + 0.7;
-      const structure = new THREE.Mesh(new THREE.BoxGeometry(1060, 1.4, 8), matStructure);
-      structure.position.set(0, y - 0.7, z);
-      groupe.add(structure);
-      const foule = new THREE.Mesh(new THREE.PlaneGeometry(1060, 7.8), matFoule);
-      foule.rotation.x = -PI / 2;
-      foule.position.set(0, y + 0.02, z);
-      groupe.add(foule);
+    // Toit, charpente et piliers de la tribune principale (z = W/2 + décalage).
+    const zg = W / 2 + DEMI + MUR;                          // mur extérieur de la ligne des stands
+    const matToit = new THREE.MeshLambertMaterial({ color: 0xc4c8ca, emissive: 0x33373b });
+    const toit = new THREE.Mesh(new THREE.BoxGeometry(1140, 0.6, 34), matToit);
+    toit.position.set(0, 15.2, zg + 26);
+    toit.rotation.x = -0.09;
+    groupe.add(toit);
+    const bandeau = new THREE.Mesh(new THREE.BoxGeometry(1140, 1.3, 0.5), new THREE.MeshLambertMaterial({ color: 0x8e1b1e }));
+    bandeau.position.set(0, 14.2, zg + 9.6);
+    bandeau.rotation.x = -0.09;
+    groupe.add(bandeau);
+    const matAcier = new THREE.MeshLambertMaterial({ color: 0x72797f });
+    const nbPil = 48;
+    const piliers = new THREE.InstancedMesh(new THREE.BoxGeometry(0.7, 16.4, 0.7), matAcier, nbPil + 1);
+    const arriere = new THREE.InstancedMesh(new THREE.BoxGeometry(0.4, 14, 0.4), matAcier, nbPil + 1);
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i <= nbPil; i++){
+      dummy.position.set(-564 + i * 23.5, 8.2, zg + 40.6);
+      dummy.updateMatrix(); piliers.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(-564 + i * 23.5, 6.9, zg + 9.6);
+      dummy.updateMatrix(); arriere.setMatrixAt(i, dummy.matrix);
     }
-    // bâtiment des stands, derrière les tribunes
-    const bat = new THREE.Mesh(new THREE.BoxGeometry(700, 14, 26), new THREE.MeshLambertMaterial({ color: 0x9aa2ab }));
-    bat.position.set(0, 7, 372);
+    groupe.add(piliers, arriere);
+
+    // Bâtiment de services derrière la tribune (façade vitrée côté piste).
+    const bat = boiteFacade(1000, 9, 20, '#a7aeb5', '#6f93b0', 0x7d848b);
+    bat.position.set(0, 4.5, zg + 62);
     groupe.add(bat);
     scene.add(groupe);
   }
@@ -1038,7 +1354,7 @@
       c.strokeStyle = '#a51f22'; c.lineWidth = 7; c.strokeRect(4, 4, 120, 64);
       c.fillStyle = '#171819'; c.font = 'bold 49px Arial,sans-serif';
       c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(String(distance), 64, 39);
-      const mat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), side: THREE.DoubleSide });
+      const mat = new THREE.MeshBasicMaterial({ map: texCanvas(cv), side: THREE.DoubleSide });
       SEGS.forEach((virage, index) => {
         if (virage.type !== 'a') return;
         const ligneAvant = SEGS[(index - 1 + SEGS.length) % SEGS.length];
@@ -1058,52 +1374,296 @@
     scene.add(groupe);
   }
 
-  function construireInfield(){
-    // arbres (instanciés) et petits bâtiments dans l'infeld
-    const nb = 70;
-    const troncGeo = new THREE.CylinderGeometry(0.35, 0.5, 3, 6);
-    const feuGeo = new THREE.ConeGeometry(2.8, 7, 7);
-    const troncs = new THREE.InstancedMesh(troncGeo, new THREE.MeshLambertMaterial({ color: 0x6b4a2f }), nb);
-    const feuilles = new THREE.InstancedMesh(feuGeo, new THREE.MeshLambertMaterial({ color: 0x2f6b2a }), nb);
-    const dummy = new THREE.Object3D();
-    let placés = 0, essais = 0;
-    while (placés < nb && essais < 4000){
-      essais++;
-      let x, z;
-      if (Math.random() < 0.7){ x = (Math.random() - 0.5) * 1100; z = (Math.random() - 0.5) * 300; }
-      else { x = (Math.random() - 0.5) * 1900; z = Math.random() < 0.5 ? -340 - Math.random() * 260 : 420 + Math.random() * 200; }
-      if (z > 220 && z < 420 && Math.abs(x) < 620) continue;   // aire des stands
-      const n = nearest(x, z, 0);
-      if (Math.abs(n.lat) < 45) continue;                       // trop près de la piste
-      const ech = 0.8 + Math.random() * 0.8;
-      dummy.position.set(x, 1.5 * ech + GRASS_Y, z);
-      dummy.rotation.y = Math.random() * TAU;
-      dummy.scale.set(ech, ech, ech);
-      dummy.updateMatrix();
-      troncs.setMatrixAt(placés, dummy.matrix);
-      dummy.position.y = (3 * ech + 2.5 * ech) + GRASS_Y;
-      dummy.updateMatrix();
-      feuilles.setMatrixAt(placés, dummy.matrix);
-      placés++;
-    }
-    troncs.count = placés; feuilles.count = placés;
-    scene.add(troncs, feuilles);
+  // Position (x, z) et distance signée à la piste (lat < 0 : dans l'infield).
+  function pointMonde(s, lat){
+    const p = posePiste(s, lat, {});
+    return { x: p.x, z: p.z };
+  }
 
-    const matBat = new THREE.MeshLambertMaterial({ color: 0xa8a29a });
-    const matToit = new THREE.MeshLambertMaterial({ color: 0x7a7f86 });
-    const batiments = [
-      [-330, 40, 60, 10, 30], [260, -70, 80, 8, 26], [-60, -120, 50, 12, 22],
-      [520, 90, 40, 7, 20], [-620, -60, 70, 9, 24]
-    ];
-    for (const [x, z, l, h, p] of batiments){
-      const b = new THREE.Mesh(new THREE.BoxGeometry(l, h, p), matBat);
-      b.position.set(x, h / 2 + GRASS_Y, z);
-      scene.add(b);
-      const t = new THREE.Mesh(new THREE.BoxGeometry(l + 1, 0.5, p + 1), matToit);
-      t.position.set(x, h + 0.25 + GRASS_Y, z);
-      scene.add(t);
+  // ---------- Végétation ----------
+  // Feuillus (tronc + 4 houppiers facettés) et conifères (3 étages), regroupés en
+  // bosquets et en lisières. Chaque essence = 1 seul draw call (instances teintées).
+  function geoFeuillu(){
+    const parts = [{ geo: new THREE.CylinderGeometry(0.22, 0.4, 3.6, 5, 1, true), matrix: mat4(0, 1.8, 0), color: 0x5b4331 }];
+    const bulles = [[0, 5.6, 0, 3.0, 0x2f6b2c], [1.9, 4.9, 0.6, 2.2, 0x3a7a32], [-1.8, 5.0, -0.7, 2.3, 0x2b6228]];
+    for (const [x, y, z, r, couleur] of bulles){
+      parts.push({ geo: new THREE.IcosahedronGeometry(r, 0), matrix: mat4(x, y, z, x * 0.3, z * 2, 0).scale(new THREE.Vector3(1, 0.86, 1)), color: couleur });
+    }
+    return fusionner(parts);
+  }
+  function geoConifere(){
+    return fusionner([
+      { geo: new THREE.CylinderGeometry(0.2, 0.34, 2.4, 5, 1, true), matrix: mat4(0, 1.2, 0), color: 0x4f3a2a },
+      { geo: new THREE.ConeGeometry(2.7, 4.6, 7, 1, true), matrix: mat4(0, 4.2, 0), color: 0x1f5028 },
+      { geo: new THREE.ConeGeometry(2.1, 4.2, 7, 1, true), matrix: mat4(0, 6.4, 0, 0, 0.5, 0), color: 0x256030 },
+      { geo: new THREE.ConeGeometry(1.4, 3.8, 7, 1, true), matrix: mat4(0, 8.5, 0, 0, 1, 0), color: 0x2d6d38 }
+    ]);
+  }
+
+  function construireVegetation(){
+    const hasard = mulberry32(4242);
+    const matArbre = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const listes = { feuillus: [], coniferes: [] };
+    const centre = new THREE.Color();
+    const zoneInterdite = (x, z) => (
+      (Math.abs(x) < 660 && z > 180 && z < 440) ||                 // stands, pagode, tribune principale
+      (x > 400 && x < 780 && Math.abs(z) < 150) || (x < -400 && x > -780 && Math.abs(z) < 150) ||   // campings
+      (Math.hypot(x - 150, z - 60) < 62) || (Math.hypot(x + 210, z + 40) < 50)                      // étangs
+    );
+    const placer = (x, z, essence) => {
+      if (zoneInterdite(x, z)) return;
+      listes[essence].push({ x, z, ech: 0.75 + hasard() * 0.9, rot: hasard() * TAU, teinte: hasard() });
+    };
+    // Bosquets en bordure extérieure : autour de la piste, derrière les gradins.
+    for (let g = 0; g < 46; g++){
+      const s = hasard() * LEN;
+      const t = trackAt(s, {});
+      const frontale = t.z > 200 && Math.abs(t.x) < 660;
+      const lat = PLOUT[0] + (frontale ? 100 : 62) + hasard() * 320;
+      const c = pointMonde(s, lat);
+      const conif = hasard() < 0.4;
+      const n = 6 + Math.floor(hasard() * 9);
+      for (let k = 0; k < n; k++){
+        placer(c.x + (hasard() - 0.5) * 60, c.z + (hasard() - 0.5) * 60, hasard() < (conif ? 0.75 : 0.2) ? 'coniferes' : 'feuillus');
+      }
+    }
+    // Lisière continue au fond de l'enceinte (haie d'arbres).
+    for (let s = 0; s < LEN; s += 22 + hasard() * 18){
+      const t = trackAt(s, {});
+      const frontale = t.z > 200 && Math.abs(t.x) < 660;
+      const c = pointMonde(s, PLOUT[0] + (frontale ? 96 : 58) + hasard() * 10);
+      placer(c.x, c.z, hasard() < 0.35 ? 'coniferes' : 'feuillus');
+    }
+    // Infield : bosquets isolés et quelques alignements, à distance de la piste.
+    for (let g = 0; g < 22; g++){
+      const cx = (hasard() - 0.5) * 1300, cz = (hasard() - 0.5) * 420;
+      const n = 3 + Math.floor(hasard() * 7);
+      for (let k = 0; k < n; k++){
+        const x = cx + (hasard() - 0.5) * 34, z = cz + (hasard() - 0.5) * 34;
+        if (nearest(x, z, 0).lat > -62) continue;
+        placer(x, z, hasard() < 0.3 ? 'coniferes' : 'feuillus');
+      }
+    }
+    // Un InstancedMesh par essence et par bloc de 600 m : le rendu écarte ceux
+    // qui sont hors du champ de vision (les arbres coûtent cher en triangles).
+    const dummy = new THREE.Object3D();
+    const leger = qualiteEconomique();
+    for (const [nom, geo] of [['feuillus', geoFeuillu()], ['coniferes', geoConifere()]]){
+      const blocs = new Map();
+      listes[nom].forEach((a, i) => {
+        if (leger && i % 2) return;
+        const cle = Math.floor(a.x / 600) + ',' + Math.floor(a.z / 600);
+        if (!blocs.has(cle)) blocs.set(cle, []);
+        blocs.get(cle).push(a);
+      });
+      for (const l of blocs.values()){
+        const mesh = new THREE.InstancedMesh(geo, matArbre, l.length);
+        l.forEach((a, i) => {
+          dummy.position.set(a.x, GRASS_Y, a.z);
+          dummy.rotation.y = a.rot;
+          dummy.scale.set(a.ech, a.ech * (0.9 + 0.3 * a.teinte), a.ech);
+          dummy.updateMatrix();
+          mesh.setMatrixAt(i, dummy.matrix);
+          if (nom === 'feuillus') centre.setHSL(0.20 + a.teinte * 0.10, 0.38 + a.teinte * 0.20, 0.62 + (a.ech - 1) * 0.2);
+          else centre.setHSL(0.34 + a.teinte * 0.05, 0.30, 0.66);
+          mesh.setColorAt(i, centre);
+        });
+        scene.add(mesh);
+      }
     }
   }
+
+  // ---------- Infield : bâtiments, étang, sable, campings ----------
+  function construireInfield(){
+    const hasard = mulberry32(1911);
+    const dummy = new THREE.Object3D();
+
+    // Bâtiments de services (façades vitrées, climatiseurs sur le toit).
+    const matClim = new THREE.MeshLambertMaterial({ color: 0x9aa0a6 });
+    const batiments = [
+      [-330, 40, 60, 10, 30, '#b9b3a8'], [260, -70, 80, 8, 26, '#a9adb0'], [-60, -120, 50, 12, 22, '#c2b8a6'],
+      [-620, -60, 70, 9, 24, '#a9adb0']
+    ];
+    for (const [x, z, l, h, p, mur] of batiments){
+      const b = boiteFacade(l, h, p, mur, '#5f86a3', 0x7a7f86);
+      b.position.set(x, h / 2 + GRASS_Y, z);
+      scene.add(b);
+      const clims = new THREE.InstancedMesh(new THREE.BoxGeometry(2.4, 1.2, 1.8), matClim, 4);
+      for (let k = 0; k < 4; k++){
+        dummy.position.set(x + (k - 1.5) * l / 5, h + 0.6 + GRASS_Y, z + (hasard() - 0.5) * p * 0.4);
+        dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix(); clims.setMatrixAt(k, dummy.matrix);
+      }
+      scene.add(clims);
+    }
+
+    // Étang du parcours de golf de l'infield + berges de sable.
+    const eau = decalage(new THREE.MeshPhongMaterial({ color: 0x2c6c86, specular: 0xbcd4e0, shininess: 90, transparent: true, opacity: 0.94 }), 3);
+    const berge = decalage(new THREE.MeshLambertMaterial({ color: 0x6d6a4c }), 1);
+    const sable = decalage(new THREE.MeshLambertMaterial({ color: 0xd8c896 }), 1);
+    const plat = (geo, mat, x, z, sx, sz, y) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.rotation.x = -PI / 2; m.scale.set(sx, sz, 1); m.position.set(x, y, z);
+      scene.add(m);
+    };
+    const disque = new THREE.CircleGeometry(1, 28);
+    for (const [x, z, rx, rz] of [[150, 60, 46, 26], [-210, -40, 34, 22]]){
+      plat(disque, berge, x, z, rx + 3.2, rz + 3.2, 0.015);
+      plat(disque, eau, x, z, rx, rz, 0.03);
+    }
+    for (const [x, z, rx, rz] of [[205, 20, 12, 7], [96, 105, 9, 6], [-160, -84, 11, 6], [-250, 0, 7, 5], [40, -60, 10, 6]]){
+      plat(disque, sable, x, z, rx, rz, 0.02);
+    }
+
+    // Campings de l'infield : camping-cars, caravanes et tentes en travées.
+    const rv = fusionner([
+      { geo: new THREE.BoxGeometry(2.5, 2.6, 8.2), matrix: mat4(0, 1.6, 0), color: 0xffffff },
+      { geo: new THREE.BoxGeometry(2.52, 0.9, 6.0), matrix: mat4(0, 2.2, -0.4), color: 0x2a3b4b },
+      { geo: new THREE.BoxGeometry(1.5, 0.35, 1.9), matrix: mat4(0, 3.1, 1.6), color: 0xc7cbcf }
+    ]);
+    const tente = fusionner([
+      { geo: new THREE.ConeGeometry(2.6, 2.4, 4), matrix: mat4(0, 1.25, 0, 0, PI / 4, 0), color: 0xffffff }
+    ]);
+    const blancs = [0xffffff, 0xf3efe6, 0xe6ebf0, 0xf1e2cf, 0xdfe5d9, 0xd9dde3, 0xf0d9d0];
+    const vifs = [0xd33a2c, 0x2f6fc0, 0xe8b830, 0x33a05a, 0xe07a2c, 0x8a55c0];
+    const campings = [];
+    const leger = qualiteEconomique();
+    for (const [x0, x1, z0, z1] of [[430, 740, -138, 138], [-740, -430, -138, 138]]){
+      for (let x = x0; x <= x1; x += 8.4){
+        for (let z = z0; z <= z1; z += 13.5){
+          if (hasard() < (leger ? 0.67 : 0.34)) continue;
+          const px = x + (hasard() - 0.5) * 1.2, pz = z + (hasard() - 0.5) * 2;
+          if (Math.hypot(px - 520, pz - 90) < 28 || Math.hypot(px + 620, pz + 60) < 44) continue;   // bâtiments
+          if (Math.hypot(px - 623, pz - 100) > 165 && pz > 0) continue;                             // reste dans les virages 1/4
+          if (Math.hypot(px - 623 * Math.sign(px), pz + 100) > 165 && pz < 0) continue;
+          campings.push({ x: px, z: pz, tente: hasard() < 0.22, rot: (hasard() < 0.5 ? 0 : PI) + (hasard() - 0.5) * 0.12 });
+        }
+      }
+    }
+    const nbRv = campings.filter(c => !c.tente).length, nbTe = campings.length - nbRv;
+    const matCamp = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const rvMesh = new THREE.InstancedMesh(rv, matCamp, Math.max(1, nbRv));
+    const teMesh = new THREE.InstancedMesh(tente, matCamp, Math.max(1, nbTe));
+    const teinte = new THREE.Color();
+    let ir = 0, it = 0;
+    for (const c of campings){
+      dummy.position.set(c.x, GRASS_Y, c.z); dummy.rotation.set(0, c.rot, 0); dummy.scale.set(1, 1, 1);
+      if (c.tente){
+        teinte.setHex(vifs[Math.floor(hasard() * vifs.length)]);
+        dummy.scale.set(1 + hasard() * 0.5, 1, 1 + hasard() * 0.5);
+        dummy.updateMatrix(); teMesh.setMatrixAt(it, dummy.matrix); teMesh.setColorAt(it++, teinte);
+      } else {
+        teinte.setHex(hasard() < 0.14 ? vifs[Math.floor(hasard() * vifs.length)] : blancs[Math.floor(hasard() * blancs.length)]);
+        dummy.updateMatrix(); rvMesh.setMatrixAt(ir, dummy.matrix); rvMesh.setColorAt(ir++, teinte);
+      }
+    }
+    rvMesh.count = ir; teMesh.count = it;
+    rvMesh.instanceMatrix.needsUpdate = teMesh.instanceMatrix.needsUpdate = true;
+    if (rvMesh.instanceColor) rvMesh.instanceColor.needsUpdate = true;
+    if (teMesh.instanceColor) teMesh.instanceColor.needsUpdate = true;
+    scene.add(rvMesh, teMesh);
+  }
+
+  // ---------- Postes de commissaires (intérieur de la piste) ----------
+  function construirePostes(){
+    const dummy = new THREE.Object3D();
+    const cab = new THREE.InstancedMesh(new THREE.BoxGeometry(1.8, 2.3, 1.8), new THREE.MeshLambertMaterial({ color: 0xecece6 }), 14);
+    const toit = new THREE.InstancedMesh(new THREE.BoxGeometry(2.3, 0.2, 2.3), new THREE.MeshLambertMaterial({ color: 0xd26a1e }), 14);
+    const mat = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.04, 0.05, 3.4, 5), new THREE.MeshLambertMaterial({ color: 0x9a9fa4 }), 14);
+    const fan = new THREE.InstancedMesh(new THREE.PlaneGeometry(1.0, 0.65), new THREE.MeshBasicMaterial({ color: 0xff7b00, side: THREE.DoubleSide }), 14);
+    let n = 0;
+    for (let k = 0; k < 14; k++){
+      const s = 90 + k * (LEN - 180) / 14;
+      const t = trackAt(s, {});
+      if (PLIN[Math.round(s / PAS) % N] < -(DEMI + MUR + 0.5)) continue;          // pas devant les stands
+      const lat = -(DEMI + MUR + 9 + (k % 2) * 4);
+      const p = posePiste(s, lat, {});
+      const y = GRASS_Y;
+      dummy.rotation.set(0, -Math.atan2(t.dz, t.dx), 0); dummy.scale.set(1, 1, 1);
+      dummy.position.set(p.x, y + 1.15, p.z); dummy.updateMatrix(); cab.setMatrixAt(n, dummy.matrix);
+      dummy.position.set(p.x, y + 2.4, p.z); dummy.updateMatrix(); toit.setMatrixAt(n, dummy.matrix);
+      dummy.position.set(p.x + t.dz * 1.3, y + 1.7, p.z - t.dx * 1.3); dummy.updateMatrix(); mat.setMatrixAt(n, dummy.matrix);
+      dummy.position.set(p.x + t.dz * 1.3 + t.dx * 0.5, y + 3.1, p.z - t.dx * 1.3 + t.dz * 0.5); dummy.updateMatrix(); fan.setMatrixAt(n, dummy.matrix);
+      n++;
+    }
+    for (const m of [cab, toit, mat, fan]){ m.count = n; m.instanceMatrix.needsUpdate = true; scene.add(m); }
+  }
+
+  // ---------- Horizon : lisière lointaine dans la brume + château d'eau ----------
+  function construireHorizon(){
+    const hasard = mulberry32(31);
+    const cv = document.createElement('canvas');
+    cv.width = 4096; cv.height = 128;
+    const c = cv.getContext('2d');
+    // Lisière basse de feuillus et de conifères, fondue dans la brume.
+    for (const [teinte, base, ampl] of [['rgba(128,156,156,.78)', 120, 30], ['rgba(92,126,114,.95)', 128, 20]]){
+      c.fillStyle = teinte;
+      for (let x = -10; x < 4106; x += 3 + hasard() * 5){
+        const h = 6 + hasard() * ampl * (0.55 + 0.45 * Math.sin(x * 0.011 + ampl));
+        const r = 3 + hasard() * 5;
+        if (hasard() < 0.25){ c.beginPath(); c.moveTo(x - r * 0.6, base); c.lineTo(x, base - h - r * 2.4); c.lineTo(x + r * 0.6, base); c.fill(); }
+        else { c.beginPath(); c.arc(x, base - h, r, 0, TAU); c.fill(); c.fillRect(x - r, base - h, r * 2, h + 12); }
+      }
+    }
+    // Quelques bâtiments et cheminées de la ville, très lointains.
+    c.fillStyle = 'rgba(146,162,172,.9)';
+    for (let k = 0; k < 16; k++){
+      const x = 100 + k * 250 + hasard() * 90, w = 4 + hasard() * 8, h = 10 + hasard() * 26;
+      c.fillRect(x, 122 - h, w, h + 6);
+    }
+    const g = c.createLinearGradient(0, 0, 0, 128);
+    g.addColorStop(0.5, 'rgba(207,224,238,0)'); g.addColorStop(1, 'rgba(207,224,238,0.6)');
+    c.globalCompositeOperation = 'source-atop';
+    c.fillStyle = g; c.fillRect(0, 0, 4096, 128);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    const anneau = new THREE.Mesh(
+      new THREE.CylinderGeometry(2900, 2900, 64, 64, 1, true),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.BackSide, fog: false, depthWrite: false })
+    );
+    anneau.position.y = 26;
+    scene.add(anneau);
+
+    // Dirigeable publicitaire qui tourne lentement au-dessus de l'infield.
+    dirigeable = new THREE.Group();
+    const coque = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), new THREE.MeshLambertMaterial({ color: 0xf1f4f7, emissive: 0x2a2f36 }));
+    coque.scale.set(24, 6.6, 6.6);
+    dirigeable.add(coque);
+    const bleu = new THREE.MeshLambertMaterial({ color: 0x27466f, emissive: 0x10161f });
+    for (const a of [0, PI / 2]){
+      const aileron = new THREE.Mesh(new THREE.BoxGeometry(6, 0.3, 5.4), bleu);
+      aileron.position.set(-20, 0, 0); aileron.rotation.x = a;
+      dirigeable.add(aileron);
+    }
+    const nacelle = new THREE.Mesh(new THREE.BoxGeometry(5, 1.6, 2.2), bleu);
+    nacelle.position.set(2, -6.9, 0);
+    dirigeable.add(nacelle);
+    scene.add(dirigeable);
+
+    // Château d'eau (repère visuel à l'extérieur de la ligne droite opposée).
+    const tour = new THREE.Group();
+    const acier = new THREE.MeshLambertMaterial({ color: 0x8b9298 });
+    const cuve = new THREE.MeshLambertMaterial({ color: 0xd9dcdc });
+    for (const [dx, dz] of [[-3, -3], [3, -3], [-3, 3], [3, 3]]){
+      const jambe = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.32, 24, 5), acier);
+      jambe.position.set(dx, 12, dz); tour.add(jambe);
+    }
+    const anneauCuve = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 8, 16), cuve); anneauCuve.position.y = 28; tour.add(anneauCuve);
+    const calotte = new THREE.Mesh(new THREE.ConeGeometry(6.2, 3.5, 16), cuve); calotte.position.y = 33.7; tour.add(calotte);
+    const dessous = new THREE.Mesh(new THREE.CylinderGeometry(6, 3, 3, 16), cuve); dessous.position.y = 22.5; tour.add(dessous);
+    const enseigne = document.createElement('canvas');
+    enseigne.width = 256; enseigne.height = 64;
+    const e = enseigne.getContext('2d');
+    e.fillStyle = '#d9dcdc'; e.fillRect(0, 0, 256, 64);
+    e.fillStyle = '#b3151b'; e.font = 'bold 34px Arial,Helvetica,sans-serif'; e.textAlign = 'center'; e.textBaseline = 'middle';
+    e.fillText('SPEEDWAY', 128, 34);
+    const plaque = new THREE.Mesh(new THREE.CylinderGeometry(6.05, 6.05, 5, 16, 1, true), new THREE.MeshLambertMaterial({ map: texCanvas(enseigne), transparent: true }));
+    plaque.position.y = 28; tour.add(plaque);
+    tour.position.set(-360, GRASS_Y, -470);
+    scene.add(tour);
+  }
+
 
   // ---------- Monuments emblématiques d'Indianapolis ----------
   function construireMonumentsIndy(){
@@ -1111,7 +1671,6 @@
 
     // 1. La Pagode (IMS Pagoda) — Tour de contrôle en gradins face aux briques
     const matBeton = new THREE.MeshLambertMaterial({ color: 0xd0d5db });
-    const matVitre = new THREE.MeshLambertMaterial({ color: 0x122432 });
     const matToit = new THREE.MeshLambertMaterial({ color: 0x22382f });
     const matMetal = new THREE.MeshLambertMaterial({ color: 0x8a929b });
     const pagode = new THREE.Group();
@@ -1132,7 +1691,7 @@
     ];
     let yCur = 5 + GRASS_Y;
     for (const e of etages){
-      const vitre = new THREE.Mesh(new THREE.BoxGeometry(e.w, e.h, e.d), matVitre);
+      const vitre = boiteFacade(e.w, e.h, e.d, '#16283a', '#78a3c4', 0x122432);
       vitre.position.y = yCur + e.h / 2;
       pagode.add(vitre);
       const coursive = new THREE.Mesh(new THREE.BoxGeometry(e.kw, 0.4, e.kd), matBeton);
@@ -1177,7 +1736,7 @@
           if ((x + y) % 2 === 1) c.fillRect(x * 8, y * 8, 8, 8);
         }
       }
-      return new THREE.CanvasTexture(cv);
+      return texCanvas(cv);
     }
     texDrapeauDamier = creerTextureDamier();
     matDrapeau = new THREE.MeshBasicMaterial({ color: 0x35e06a, side: THREE.DoubleSide });
@@ -1259,6 +1818,7 @@
     pylonCanvas.width = 128; pylonCanvas.height = 512;
     pylonCtx = pylonCanvas.getContext('2d');
     pylonTex = new THREE.CanvasTexture(pylonCanvas);
+    pylonTex.colorSpace = THREE.SRGBColorSpace;
     pylonTex.minFilter = THREE.LinearFilter;
     majScoringPylon(0, true);
 
@@ -1279,8 +1839,19 @@
     scene.add(groupe);
   }
 
+  // Éléments animés du décor : les nuages dérivent, le dirigeable tourne.
+  function majDecor(dt){
+    if (cielMesh) cielMesh.rotation.y += dt * 0.004;
+    if (dirigeable){
+      dirigeableAngle += dt * 12 / 640;
+      const a = dirigeableAngle;
+      dirigeable.position.set(Math.cos(a) * 640 - 60, 210 + Math.sin(a * 3) * 6, Math.sin(a) * 640);
+      dirigeable.rotation.y = -Math.atan2(Math.cos(a), -Math.sin(a));
+    }
+  }
+
   let matFeux = [], matHalos = [];
-  let drapeauStarterMesh = null, matDrapeau = null, texDrapeauDamier = null;
+  let drapeauStarterMesh = null, matDrapeau = null, texDrapeauDamier = null, drapeauAffiche = '';
 
   function majFeuxPortique(dt){
     if (matFeux.length < 5) return;
@@ -1299,36 +1870,29 @@
           matHalos[i].opacity = 0;
         }
       }
-    } else if (course.phase === 'verte'){
-      // Au départ, les 5 feux passent tous au VERT éclatant pendant 5 secondes
-      if (t < 5.0){
-        for (let i = 0; i < 5; i++){
-          matFeux[i].color.setHex(0x00ff44);
-          matHalos[i].color.setHex(0x33ff66);
-          matHalos[i].opacity = 0.75;
-        }
-      } else {
-        // En course normale : feux éteints
-        for (let i = 0; i < 5; i++){
-          matFeux[i].color.setHex(0x18181c);
-          matHalos[i].opacity = 0;
-        }
-      }
-    } else if (flagLbl.className === 'jaune'){
-      // Drapeau jaune : clignotement ambre à 2,5 Hz
-      const allume = Math.sin(t * 16) > 0;
-      for (let i = 0; i < 5; i++){
-        matFeux[i].color.setHex(allume ? 0xffb000 : 0x18181c);
-        matHalos[i].color.setHex(0xffc020);
-        matHalos[i].opacity = allume ? 0.6 : 0;
-      }
-    } else if (flagLbl.className === 'damier' || course.phase === 'fini'){
+    } else if (course.phase === 'fini'){
       // Drapeau à damier : clignotement blanc éclatant à 3 Hz
       const allume = Math.sin(t * 18) > 0;
       for (let i = 0; i < 5; i++){
         matFeux[i].color.setHex(allume ? 0xffffff : 0x18181c);
         matHalos[i].color.setHex(0xffffff);
         matHalos[i].opacity = allume ? 0.7 : 0;
+      }
+    } else if (course.yellow){
+      // Drapeau jaune : clignotement ambre à 2,5 Hz (testé avant la phase
+      // « verte », qui reste active pendant la neutralisation)
+      const allume = Math.sin(t * 16) > 0;
+      for (let i = 0; i < 5; i++){
+        matFeux[i].color.setHex(allume ? 0xffb000 : 0x18181c);
+        matHalos[i].color.setHex(0xffc020);
+        matHalos[i].opacity = allume ? 0.6 : 0;
+      }
+    } else if (course.phase === 'verte' && t < 5.0){
+      // Au départ, les 5 feux passent tous au VERT éclatant pendant 5 secondes
+      for (let i = 0; i < 5; i++){
+        matFeux[i].color.setHex(0x00ff44);
+        matHalos[i].color.setHex(0x33ff66);
+        matHalos[i].opacity = 0.75;
       }
     } else {
       for (let i = 0; i < 5; i++){
@@ -1352,8 +1916,12 @@
     }
     pos.needsUpdate = true;
 
-    // Couleur / texture selon le drapeau actif
+    // Couleur / texture selon le drapeau actif. Le matériau n'est modifié qu'au
+    // changement de drapeau : needsUpdate à chaque image force Three.js à
+    // réévaluer le programme shader.
     const flag = flagLbl.className;
+    if (flag === drapeauAffiche) return;
+    drapeauAffiche = flag;
     if (flag === 'damier' && texDrapeauDamier){
       matDrapeau.map = texDrapeauDamier;
       matDrapeau.color.setHex(0xffffff);
@@ -1390,7 +1958,7 @@
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText('INDY 500', 64, 20);
 
-    const tourNum = voitureJoueur ? Math.min(course.tours || 10, voitureJoueur.lap + 1) : 1;
+    const tourNum = voitureJoueur ? tourAffiche(voitureJoueur) : 1;
     ctx.fillStyle = '#14141c';
     ctx.fillRect(6, 34, 116, 24);
     ctx.fillStyle = '#cfd6e4';
@@ -1850,9 +2418,18 @@
   const course = {
     mode: 'menu', phase: 'idle', temps: 0, tours: 10, difficulte: 1,
     compte: 0, message: '', messageT: 0, classement: [], resultat: null,
-    qualTempsIA: [], yellow: false, yellowTimer: 0, yellowLaps: 0, yellowStartLap: 0
+    qualTempsIA: [], yellow: false, yellowTimer: 0, yellowLaps: 0, yellowStartLap: 0,
+    recordTourDebut: 0, feux: 0
   };
   let voitures = [], voitureJoueur = null;
+  let derniereQualif = 0;           // vitesse moyenne (mph) de la dernière qualification
+
+  // Numéro du tour affiché (plafonné à la distance de la séance).
+  function tourAffiche(v){
+    if (course.mode === 'race') return Math.min(course.tours, v.lap + 1);
+    if (course.mode === 'qualify') return Math.min(4, v.lap + 1);
+    return v.lap + 1;
+  }
   let caméraMode = 0;               // 0 cockpit · 1 capot · 2 poursuite
   let cameraSnap = true;
   let secousse = 0;
@@ -1900,7 +2477,10 @@
       this.lap = 0; this.lapStart = 0; this.lastLap = 0; this.bestLap = 0;
       this.timing = false; this.progress = 0; this.pos = 1;
       this.finished = false; this.finishTime = 0; this.dnf = false; this.dnfRaison = '';
-      this.pitTimer = -1; this.pitActif = false; this.pitStopLap = 0; this.pitFait = false;
+      this.pitTimer = -1; this.pitActif = false; this.pitStopLap = 0;
+      this.enStand = false; this.sortieStand = false;       // IA : entrée / sortie des stands
+      this.fuelDebutTour = this.fuel; this.fuelTour = 0;    // consommation mesurée sur le dernier tour
+      this.dnfT = 0; this.retire = false;                   // voiture retirée de la piste après abandon
       this.qualLaps = [];
       this.lean = 0;
       this.draft = 0;
@@ -1985,7 +2565,7 @@
     if (vF < 8 && throttle > 0) rpmCalc = Math.max(rpmCalc, 3200 + throttle * 3000);
     v.rpm = clamp(rpmCalc, 900, 12500);
     if (v.shiftT > 0) v.shiftT -= dt;
-    else if (!v.joueur || SETUP.trans === 'auto'){
+    else if (!v.joueur || SETUP.trans === 'auto' || v.ia){   // v.ia : pilote automatique après l'arrivée
       if (v.rpm > 11300 && v.gear < 6){ v.gear++; v.shiftT = 0.22; }
       else if (v.rpm < 7600 && v.gear > 1 && vF > 12){ v.gear--; v.shiftT = 0.22; }
     }
@@ -2004,7 +2584,7 @@
     force = Math.min(force, 0.58 * maxLat * masse);        // motricité
 
     let frein = 0;
-    if (entree.brake > 0 && !v.dnf){
+    if (entree.brake > 0){                                   // les freins restent actifs après un abandon
       const eff = 1 - Math.abs(v.setup.bias - 58) * 0.008;
       frein = Math.min(2.3 * masse * G * eff, maxLat * 1.4 * masse) * clamp(entree.brake, 0, 1);
     }
@@ -2080,6 +2660,7 @@
           sonCrash(clamp(impact / 22, 0, 1));
           if (v.joueur) secouer(clamp(impact / 25, 0, 1));
           emettreEtincelles(v.x, v.y + 0.4, v.z, -v.vx * 0.3, -v.vz * 0.3, nx * touche * 5.5, 14);
+          if (impact > 16) declencherDrapeauJaune();      // gros choc contre le mur
         }
       }
     }
@@ -2090,8 +2671,10 @@
     const r = 2.05;
     for (let i = 0; i < voitures.length; i++){
       const a = voitures[i];
+      if (a.retire) continue;
       for (let j = i + 1; j < voitures.length; j++){
         const b = voitures[j];
+        if (b.retire) continue;
         const dx = b.x - a.x, dz = b.z - a.z;
         const d2 = dx * dx + dz * dz;
         if (d2 >= r * r || d2 < 1e-6) continue;
@@ -2155,50 +2738,65 @@
       vT = Math.min(vT, 33); // ~120 km/h
     }
 
-    // Gestion de l'arrêt aux stands des IA (course longue)
-    if (v.pitStopLap > 0 && v.lap >= v.pitStopLap && !v.pitFait){
-      if (v.s > LEN - 250 || v.s < 380){
-        v.ia.offset = -(DEMI + 15);
+    // Pilote automatique du joueur après l'arrivée : tour de décélération.
+    if (v.ia.vMax) vT = Math.min(vT, v.ia.vMax);
+
+    // Arrêts aux stands des IA : un premier arrêt planifié (stratégies
+    // variées), puis dès que le carburant restant ne couvre plus ~1,5 tour.
+    // La décision n'est prise qu'à l'approche de l'entrée des stands.
+    let offsetCible = v.ia.baseOffset;
+    if (!v.joueur && !v.dnf){
+      const toursRestants = course.tours - v.lap;
+      const planifie = v.pitStopLap > 0 && v.lap >= v.pitStopLap;
+      const carburant = v.fuelTour > 0 && v.fuel < v.fuelTour * 1.5;
+      if (!v.enStand && (planifie || carburant) && toursRestants > 1 && v.s > LEN - 250 && v.s < LEN - 180){
+        v.enStand = true; v.pitTimer = -1;
+      }
+      if (v.enStand){
+        offsetCible = -(DEMI + 15);
         const standS = 70 + (v.num % 28) * 9;
-        if (v.s > standS - 8 && v.s < standS + 8){
+        const dansZone = v.s > LEN - 250 || v.s < standS + 8;
+        if (!dansZone){
+          v.enStand = false; v.sortieStand = true;          // case manquée : on repart
+        } else if (v.s > standS - 8 && v.s < standS + 8){
           if (v.pitTimer < 0) v.pitTimer = 0;
           v.pitTimer += dt;
-          vT = 0; // Arrêt au box
+          vT = 0;                                           // arrêt au box
           if (v.pitTimer >= 11){
-            v.fuel = v.setup.fuel;
+            v.fuel = v.setup.fuel; v.fuelDebutTour = v.fuel;
             v.wear = 0;
             v.damage = Math.max(0, v.damage - 35);
-            v.pitFait = true;
-            v.pitTimer = 0;
+            v.pitStopLap = 0;                               // la suite se gère au carburant
+            v.enStand = false; v.sortieStand = true;
           }
         } else {
-          vT = Math.min(vT, 14); // vitesse dans les stands
+          vT = Math.min(vT, 14);                            // vitesse dans les stands
         }
-      } else {
-        v.ia.offset = v.ia.baseOffset;
+      } else if (v.sortieStand){
+        if (v.s > 450 && v.s < LEN / 2) v.sortieStand = false;
+        else { offsetCible = -(DEMI + 15) * clamp((450 - v.s) / 250, 0, 1) + v.ia.baseOffset; vT = Math.min(vT, 40); }
       }
-    } else if (v.pitFait && v.s < 450){
-      v.ia.offset = lerp(v.ia.offset, v.ia.baseOffset, dt * 1.5);
     }
 
     // circulation : ralentir et décaler la trajectoire
-    let offsetCible = v.ia.baseOffset, limite = Infinity;
+    let limite = Infinity;
     for (let i = 0; i < voitures.length; i++){
       const a = voitures[i];
-      if (a === v) continue;
+      if (a === v || a.retire) continue;
       let ds = a.s - v.s;
       if (ds < -LEN / 2) ds += LEN; if (ds > LEN / 2) ds -= LEN;
       if (ds > 1 && ds < (course.yellow ? 40 : 30)){
         const dlat = a.lat - v.lat;
         if (Math.abs(dlat) < 3.4){
           limite = Math.min(limite, a.vitesse * (course.yellow ? 0.90 : 0.96));
-          offsetCible = v.ia.baseOffset + (dlat > 0 ? -3.4 : 3.4);
+          if (!v.enStand && !v.sortieStand) offsetCible = v.ia.baseOffset + (dlat > 0 ? -3.4 : 3.4);
         }
       }
     }
     vT = Math.min(vT, limite);
     v.ia.offset += (offsetCible - v.ia.offset) * clamp(dt * 1.5, 0, 1);
 
+    if (v.dnf) return { steer, throttle: 0, brake: 0.7 };   // voiture accidentée : on s'arrête
     const throttle = sp < vT - 1 ? 1 : 0;
     const brake = sp > vT + 2 ? clamp((sp - vT) / 8, 0, 1) : 0;
     return { steer, throttle, brake };
@@ -2319,7 +2917,11 @@
 
   function majTour(v){
     const prev = v.prevS, s = v.s;
-    if (prev > LEN * 0.7 && s < LEN * 0.3 && (course.phase === 'verte' || course.yellow)){
+    const enCourse = course.phase === 'verte' || course.yellow;
+    // Franchissement de la ligne à reculons : le tour en cours est invalidé
+    // (sinon reculer puis repasser la ligne donnerait un tour de 5 secondes).
+    if (prev < LEN * 0.3 && s > LEN * 0.7 && enCourse) v.timing = false;
+    if (prev > LEN * 0.7 && s < LEN * 0.3 && enCourse){
       const t = course.temps;
       if (!v.timing){
         v.timing = true; v.lapStart = t;
@@ -2328,13 +2930,23 @@
         if (v.lastLap > 3 && (v.bestLap === 0 || v.lastLap < v.bestLap)) v.bestLap = v.lastLap;
         v.lap++;
         v.lapStart = t;
+        if (v.fuelDebutTour > v.fuel) v.fuelTour = v.fuelDebutTour - v.fuel;
+        v.fuelDebutTour = v.fuel;
         if (v.joueur){
           if (course.mode === 'qualify') v.qualLaps.push(v.lastLap);
           sonTour();
+          // Record du tour enregistré immédiatement : quitter les essais par
+          // le menu pause ne doit pas le perdre.
+          const rec = stockage.nombre('indy500Lap', 0);
+          if (v.lastLap > 3 && (rec === 0 || v.lastLap < rec)){
+            stockage.ecrire('indy500Lap', v.lastLap.toFixed(3));
+            setMessage('RECORD DU TOUR — ' + fmtTime(v.lastLap), 3);
+          }
         }
       }
-      // Fin de neutralisation sous drapeau jaune après passage sur la ligne
-      if (v.joueur && course.yellow && course.yellowTimer <= 0){
+      // Fin de neutralisation quand le leader passe la ligne une fois le délai
+      // écoulé (et non le joueur : sinon un joueur arrêté bloquait le jaune).
+      if (course.yellow && course.yellowTimer <= 0 && (v.pos === 1 || course.mode !== 'race')){
         course.yellow = false;
         majDrapeau('vert');
         setMessage('DRAPEAU VERT ! REPRISE DE LA COURSE !', 3);
@@ -2460,10 +3072,19 @@
     majModele(v, 0);
   }
 
-  function creerPlateau(mode){
-    // supprime les voitures précédentes
-    for (const v of voitures) scene.remove(v.groupe);
+  // Retire une voiture de la scène et libère ses géométries propres
+  // (les géométries de carrosserie et de roues sont partagées et conservées).
+  function libererVoitures(){
+    const partagees = new Set([GEO_ROUE_AV, GEO_ROUE_AR, ...Object.values(cacheCorps), ...Object.values(cacheNez)]);
+    for (const v of voitures){
+      scene.remove(v.groupe);
+      v.groupe.traverse(o => { if (o.geometry && !partagees.has(o.geometry)) o.geometry.dispose(); });
+    }
     voitures = [];
+  }
+
+  function creerPlateau(mode){
+    libererVoitures();
     verresMiroir.length = 0;
     const joueur = new Voiture(SETUP.carNum || 89, SETUP.carColor || 0xe63946, true);
     voitureJoueur = joueur;
@@ -2471,8 +3092,9 @@
 
     if (mode === 'race'){
       // place sur la grille selon la qualification
+      // Place sur la grille : dernière qualification de la session, sinon le record.
       let idx = 16;   // sans qualification : milieu de grille
-      const rec = +(localStorage.getItem('indy500Qual') || 0);
+      const rec = derniereQualif || stockage.nombre('indy500Qual', 0);
       if (rec > 0){
         const recLap = rec > 100 ? (10 / rec * 3600 / 4) : rec;
         idx = 0;
@@ -2480,7 +3102,7 @@
       }
       for (let i = 0; i < 32; i++){
         const coul = COULEURS[i % COULEURS.length];
-        const numVoiture = i >= (SETUP.carNum || 89) ? i + 2 : i + 1;
+        const numVoiture = i + 1 >= SETUP.carNum ? i + 2 : i + 1;   // jamais le numéro du joueur
         const v = new Voiture(numVoiture, coul, false);
         v.ia.maxLat = [13.8, 15.6, 16.6][course.difficulte] * (1.04 - i * 0.0016);
         v.ia.skill = 1.0;
@@ -2513,6 +3135,8 @@
     course.temps = 0;
     course.message = ''; course.messageT = 0;
     course.yellow = false; course.yellowTimer = 0;
+    course.recordTourDebut = stockage.nombre('indy500Lap', 0);
+    course.feux = 0;
     course.tours = SETUP.laps;
     course.difficulte = SETUP.diff;
     course.qualTempsIA = mode === 'race' || mode === 'qualify' ? tempsQualifIA() : [];
@@ -2536,9 +3160,13 @@
     topbar.classList.remove('hidden');
     majDrapeau('vert');
     initAudio();
+    appliquerVolume();
     majRecords();
     resetParticules();
     majScoringPylon(0, true);
+    sauverReglages();
+    dash.balayage = 1.8;             // balayage de contrôle des cadrans à la mise du contact
+    dash.telltale = 0;
   }
 
   function setMessage(txt, duree){
@@ -2556,16 +3184,25 @@
     course.classement = voitures.slice().sort((a, b) => b.progress - a.progress);
     course.classement.forEach((v, i) => v.pos = i + 1);
   }
+  // Écart au leader : en tours s'il nous a pris un tour, sinon en secondes.
+  // Un leader arrivé est figé à sa distance d'arrivée (son `progress` ne
+  // représente plus une distance).
   function ecartLeader(v){
     const l = course.classement[0];
-    if (!l || l === v) return 0;
-    return (l.progress - v.progress) / Math.max(25, l.vitesse);
+    if (!l || l === v) return '—';
+    const dL = l.finished ? l.distFin : l.lap * LEN + l.s;
+    const d = dL - (v.lap * LEN + v.s);
+    if (d >= LEN) return '+' + Math.floor(d / LEN) + ' T';
+    return fmtGap(d / Math.max(25, l.finished ? v.vitesse : l.vitesse));
   }
 
   function majCourse(dt){
     if (course.phase === 'idle' || course.phase === 'fini') return;
     if (course.phase === 'compte'){
       course.compte -= dt;
+      // bip à l'allumage de chaque feu rouge (même calcul que le portique)
+      const feux = clamp(Math.floor((4.6 - course.compte) / 0.82) + 1, 1, 5);
+      if (feux !== course.feux && course.compte > 0){ course.feux = feux; sonFeu(); }
       if (course.compte <= 0){
         course.phase = 'verte';
         course.temps = 0;
@@ -2576,10 +3213,7 @@
       return;
     }
     course.temps += dt;
-    if (course.messageT > 0){
-      course.messageT -= dt;
-      if (course.messageT <= 0) course.message = '';
-    }
+    const j = voitureJoueur;
 
     // Gestion du décompte de neutralisation sous drapeau jaune
     if (course.yellow){
@@ -2592,10 +3226,20 @@
     let finJoueur = false;
     // abandons
     for (const v of voitures){
-      if (v.dnf || v.finished) continue;
+      if (v.dnf){
+        // Une IA accidentée finit sa glissade puis quitte la piste : elle ne
+        // bloque plus la circulation ni les collisions.
+        if (!v.joueur && !v.retire){
+          v.dnfT += dt;
+          if (v.dnfT > 4 && v.vitesse < 8){ v.retire = true; v.groupe.visible = false; }
+        }
+        continue;
+      }
+      if (v.finished) continue;
       if (v.damage >= 100){
         v.dnf = true; v.dnfRaison = 'Accident';
         if (v.joueur) finJoueur = true;
+        else declencherDrapeauJaune();
       } else if (v.fuel <= 0 && v.vitesse < 1.5){
         v.dnf = true; v.dnfRaison = 'Panne sèche';
         if (v.joueur) finJoueur = true;
@@ -2603,14 +3247,13 @@
     }
 
     // arrêt aux stands du joueur
-    const j = voitureJoueur;
     if (j && !j.finished && !j.dnf) majStands(j, dt);
 
     // arrivée
     if (course.mode === 'race'){
       for (const v of voitures){
         if (!v.finished && !v.dnf && v.lap >= course.tours){
-          v.finished = true; v.finishTime = course.temps;
+          v.finished = true; v.finishTime = course.temps; v.distFin = v.lap * LEN + v.s;
           v.progress = 1e7 - v.finishTime * 10;
           if (v.joueur) finJoueur = true;
         }
@@ -2659,8 +3302,12 @@
 
   function finSession(){
     course.phase = 'fini';
+    course.yellow = false;
     majDrapeau('damier');
     const j = voitureJoueur;
+    // Tour de décélération : la voiture est ramenée au pas par le pilote
+    // automatique au lieu de se figer sur place.
+    j.ia = { maxLat: 11, offset: 0, baseOffset: 0, skill: 1, vMax: 42 };
     const pos = j.pos;
     let titre, lignes = [];
     if (j.dnf){
@@ -2681,10 +3328,11 @@
       const avgMph = total4 > 0 ? ((nbT * 2.5) / (total4 / 3600)).toFixed(3) : '0';
       const avgKmh = total4 > 0 ? ((nbT * 4.023) / (total4 / 3600)).toFixed(2) : '0';
       lignes.push('<div class="resultLine" style="margin:8px 0;color:#ffb000;">Vitesse moyenne : <b>' + avgMph + ' mph</b> (' + avgKmh + ' km/h)</div>');
-      const rec = +(localStorage.getItem('indy500Qual') || 0);
+      const rec = stockage.nombre('indy500Qual', 0);
       const qualScore = +avgMph;
+      if (qualScore > 0) derniereQualif = qualScore;
       if (qualScore > rec){
-        localStorage.setItem('indy500Qual', qualScore.toFixed(3));
+        stockage.ecrire('indy500Qual', qualScore.toFixed(3));
         lignes.push('<div class="resultLine" style="color:#35e06a">Nouveau record de qualification !</div>');
       }
       const myAvgLap = total4 / nbT;
@@ -2695,19 +3343,16 @@
       lignes.push('<div class="resultLine">Position : <b>' + pos + '</b> / ' + voitures.length + '</div>');
       lignes.push('<div class="resultLine">Temps total : <b>' + fmtTime(j.finishTime) + '</b></div>');
       lignes.push('<div class="resultLine">Meilleur tour : <b>' + fmtTime(j.bestLap) + '</b></div>');
-      const recPos = +(localStorage.getItem('indy500Race') || 99);
-      if (pos < recPos){ localStorage.setItem('indy500Race', pos); lignes.push('<div class="resultLine" style="color:#35e06a">Votre meilleur résultat !</div>'); }
+      const recPos = stockage.nombre('indy500Race', 99);
+      if (pos < recPos){ stockage.ecrire('indy500Race', pos); lignes.push('<div class="resultLine" style="color:#35e06a">Votre meilleur résultat !</div>'); }
     } else {
       titre = 'ESSAIS TERMINÉS';
       lignes.push('<div class="resultLine">Meilleur tour : <b>' + fmtTime(j.bestLap) + '</b></div>');
     }
-    // meilleur tour absolu (essais / course)
-    if (j.bestLap > 0){
-      const rec = +(localStorage.getItem('indy500Lap') || 0);
-      if (rec === 0 || j.bestLap < rec){
-        localStorage.setItem('indy500Lap', j.bestLap.toFixed(3));
-        lignes.push('<div class="resultLine" style="color:#35e06a">Record absolu du circuit !</div>');
-      }
+    // meilleur tour absolu : déjà enregistré tour par tour dans majTour,
+    // on compare ici au record connu au début de la séance.
+    if (j.bestLap > 0 && (course.recordTourDebut === 0 || j.bestLap < course.recordTourDebut)){
+      lignes.push('<div class="resultLine" style="color:#35e06a">Record absolu du circuit !</div>');
     }
     course.resultat = { titre, lignes };
     document.getElementById('resultTitle').textContent = titre;
@@ -2718,160 +3363,579 @@
   }
 
   // ==================================================================
-  //  Tableau de bord (canvas 2D) — cadrans analogiques façon 1989
+  //  Tableau de bord (canvas 2D) — poste de pilotage d'IndyCar 1989
+  //  Planche en carbone, compte-tours central avec aiguille-témoin,
+  //  cadrans secondaires à aiguilles amorties, afficheurs à 7 segments,
+  //  voyants à lentille et, en vue cockpit, le volant tenu par le pilote.
+  //  Tout ce qui est fixe (habitacle, planche, faces des cadrans,
+  //  étiquettes) est dessiné une seule fois dans un canvas hors écran,
+  //  reconstruit uniquement quand la mise en page change.
   // ==================================================================
-  const dash = { H: 0, y: 0, k: 1, bigR: 70, smallR: 38 };
+  const dash = { H: 0, y: 0, k: 1, compact: false, g: {}, fond: null, fondY: 0, cleFond: '',
+    balayage: 0, telltale: 0, ox: 0, oy: 0 };
   const aiguilles = {};
+  const AZ_SOLEIL = Math.atan2(-500, -700);        // azimut de la lumière `soleil`
+  const POLICE = 'Consolas,"DejaVu Sans Mono",monospace';
+  const A0 = PI * 0.75, BALAYAGE = PI * 1.5;       // cadrans : 270° de 7 h 30 à 4 h 30
+
+  // Compte-tours de course : 2 000 à 13 000 tr/min, butée en dessous.
+  const TACHY = { min: 2000, max: 13000, major: 1000, minor: 250, div: 1000, red: [11500, 13000], repere: 11300 };
+  // Cadrans secondaires, dans l'ordre d'implantation (2 rangées de 3).
+  const CADRANS = [
+    { cle: 'oilP',  label: 'HUILE',   unite: 'PSI',  min: 0,  max: 100, major: 20, minor: 5,  red: [0, 20],    val: v => v.oilP },
+    { cle: 'water', label: 'EAU',     unite: '°C',   min: 60, max: 130, major: 20, minor: 5,  red: [115, 130], val: v => v.water },
+    { cle: 'oil',   label: 'HUILE',   unite: '°C',   min: 60, max: 150, major: 30, minor: 10, red: [135, 150], val: v => v.oil },
+    // pression d'admission absolue : ~30 inHg = atmosphère, 45 inHg = soupape de décharge de 1989
+    { cle: 'boost', label: 'TURBO',   unite: 'inHg', min: 10, max: 60,  major: 10, minor: 5,  red: [45, 60],   val: v => 12 + clamp(v.boost, 0, 1.2) * 38 },
+    { cle: 'fuel',  label: 'ESSENCE', unite: 'GAL',  min: 0,  max: 40,  major: 10, minor: 5,  red: [0, 6],     val: v => v.fuel },
+    { cle: 'fuelP', label: 'P. ESS.', unite: 'PSI',  min: 0,  max: 80,  major: 20, minor: 10, red: [0, 20],    val: v => pressionEssence(v) }
+  ];
+  // Lignes de l'afficheur de données, par priorité (les dernières
+  // disparaissent quand la hauteur manque).
+  const LIGNES_LCD = ['POSITION', 'TOUR', 'ÉCART', 'DERNIER', 'MEILLEUR', 'ESSENCE', 'TEMPS', 'PNEUS', 'ASPIRATION'];
+  const VOYANTS = [
+    { label: 'HUILE',  couleur: '#ff3020', test: v => v.oilP < 25 },
+    { label: 'EAU',    couleur: '#ff3020', test: v => v.water > 115 },
+    { label: 'ESS.',   couleur: '#ffae00', test: v => v.fuel < 6 },
+    { label: 'DÉGÂTS', couleur: '#ff3020', test: v => v.damage > 50 },
+    { label: 'STAND',  couleur: '#30ff70', test: v => v.pitActif }
+  ];
+  const SEPT_SEG = { '0': 0x3f, '1': 0x06, '2': 0x5b, '3': 0x4f, '4': 0x66, '5': 0x6d, '6': 0x7d, '7': 0x07, '8': 0x7f, '9': 0x6f, '-': 0x40, ' ': 0 };
+
+  const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + a + ')'; };
+  const teinte = (n, f) => 'rgb(' + [n >> 16 & 255, n >> 8 & 255, n & 255].map(x => Math.min(255, Math.round(x * f))).join(',') + ')';
+  const angleCadran = (o, val) => A0 + clamp((val - o.min) / (o.max - o.min), 0, 1) * BALAYAGE;
+  function rectArrondi(c, x, y, w, h, r){ if (c.roundRect) c.roundRect(x, y, w, h, r); else c.rect(x, y, w, h); }
+
+  // Réservoir presque vide : la pompe aspire de l'air, la pression chute et oscille.
+  function pressionEssence(v){
+    if (v.fuel <= 0) return 0;
+    const p = 46 + v.throttle * 9;
+    if (v.fuel > 2.5) return p;
+    return p * (v.fuel / 2.5) * (0.7 + 0.3 * Math.sin(performance.now() * 0.013));
+  }
+
+  // Aiguille à ressort amorti : inertie et léger dépassement, comme un vrai galvanomètre.
+  function aiguille(cle, cible, omega, zeta, dt){
+    let a = aiguilles[cle];
+    if (!a) a = aiguilles[cle] = { x: cible, v: 0 };
+    const n = Math.ceil(dt / 0.01);
+    for (let i = 0; i < n; i++){
+      const h = dt / n;
+      a.v += (omega * omega * (cible - a.x) - 2 * zeta * omega * a.v) * h;
+      a.x += a.v * h;
+    }
+    return a.x;
+  }
+  // Consigne d'un cadran, avec le balayage de contrôle à la mise du contact.
+  function consigne(o, val){
+    if (dash.balayage <= 0) return val;
+    return lerp(val, o.max, Math.sin(clamp(1 - dash.balayage / 1.8, 0, 1) * PI));
+  }
 
   function layoutDash(){
-    dash.H = clamp(cssH * 0.34, 172, 300);
-    dash.y = cssH - dash.H;
-    dash.k = clamp(cssW / 1280, 0.62, 1.1);
-    dash.bigR = 70 * dash.k;
-    dash.smallR = 38 * dash.k;
-  }
-  function aiguille(cle, cible, vitesse, dt){
-    if (aiguilles[cle] === undefined) aiguilles[cle] = cible;
-    aiguilles[cle] += (cible - aiguilles[cle]) * clamp(dt * vitesse, 0, 1);
-    return aiguilles[cle];
-  }
-
-  function dessinerPanneau(W, H, y, h){
-    const g = dctx.createLinearGradient(0, y, 0, H);
-    g.addColorStop(0, '#303036'); g.addColorStop(0.2, '#1c1d22'); g.addColorStop(1, '#0e0f13');
-    dctx.save();
-    dctx.shadowColor = 'rgba(0,0,0,.9)';
-    dctx.shadowBlur = 18;
-    dctx.shadowOffsetY = -4;
-    dctx.fillStyle = g; dctx.fillRect(0, y, W, h);
-    dctx.restore();
-
-    // Casquette souple au-dessus des instruments et joint de la planche.
-    const bord = clamp(h * 0.08, 13, 22);
-    const cuir = dctx.createLinearGradient(0, y - 6, 0, y + bord);
-    cuir.addColorStop(0, '#333338'); cuir.addColorStop(0.48, '#191a1e'); cuir.addColorStop(1, '#090a0d');
-    dctx.beginPath();
-    dctx.moveTo(0, y + bord);
-    dctx.lineTo(0, y + 5);
-    dctx.quadraticCurveTo(W / 2, y - 11, W, y + 5);
-    dctx.lineTo(W, y + bord);
-    dctx.closePath();
-    dctx.fillStyle = cuir; dctx.fill();
-    dctx.fillStyle = '#42434a'; dctx.fillRect(0, y + bord, W, 1);
-    dctx.fillStyle = '#08090b'; dctx.fillRect(0, y + bord + 1, W, 2);
-
-    // Têtes de fixation dans la partie supérieure du panneau.
-    for (let x = 26; x < W; x += 130){
-      const fy = y + bord * 0.48;
-      dctx.beginPath(); dctx.arc(x, fy, 3.2, 0, TAU);
-      dctx.fillStyle = '#08090b'; dctx.fill();
-      dctx.beginPath(); dctx.arc(x, fy, 2.2, 0, TAU);
-      dctx.fillStyle = '#777983'; dctx.fill();
-      dctx.beginPath(); dctx.moveTo(x - 1.2, fy + 0.7); dctx.lineTo(x + 1.2, fy - 0.7);
-      dctx.strokeStyle = '#292b31'; dctx.lineWidth = 0.8; dctx.stroke();
+    const W = cssW, H = cssH, g = dash.g;
+    dash.compact = W < 680;
+    dash.H = clamp(H * 0.34, 172, 300);
+    dash.y = H - dash.H;
+    dash.k = clamp(W / 1280, 0.62, 1.1);
+    const h = dash.H, y = dash.y, cx = W / 2;
+    g.cx = cx;
+    if (dash.compact){
+      g.rw = 0;
+      g.rt = Math.min(h * 0.36, W * 0.2);
+      g.ty = y + h * 0.5;
+      g.wy = g.ty + g.rt;
+    } else {
+      g.rw = Math.min(h * 0.95, W * 0.21);                     // rayon du volant
+      g.rt = Math.min(h * 0.4, g.rw * 0.45);                   // rayon du compte-tours
+      g.ty = y + h * 0.46;
+      // le compte-tours reste visible dans l'ouverture haute du volant
+      g.wy = g.ty + Math.max(g.rt, Math.min(0.88 * g.rw - g.rt, h * 0.5));
     }
-    dctx.fillStyle = 'rgba(255,255,255,.035)';
-    dctx.fillRect(0, y + bord + 4, W, 1);
+    const rt = g.rt;
+    g.bosse = y - h * 0.07;                  // sommet de la casquette du compte-tours
+    g.haut = y + h * 0.08;                   // arête de la planche
+    g.rl = rt * 0.13;                        // lampes de changement de rapport
+    g.lampes = [{ x: cx - rt * 1.12, y: g.ty - rt * 0.62, couleur: '#ffae00' }, { x: cx + rt * 1.12, y: g.ty - rt * 0.62, couleur: '#ff2a1a' }];
+    g.rapport = { x: cx + rt * 1.02, y: g.ty + rt * 0.26, w: rt * 0.36, h: rt * 0.48 };
+    g.tour = dash.compact ? null : { x: cx - rt * 1.66, y: g.ty + rt * 0.26, w: rt * 0.64, h: rt * 0.48 };
+    g.vitesse = { x: cx - rt * 0.31, y: g.ty + rt * 0.33, w: rt * 0.62, h: rt * 0.28 };
+
+    if (!dash.compact){
+      // cadrans secondaires à gauche du volant
+      const libre = cx - g.rw - 26;
+      const sr = Math.min((libre - 20) / 6, (h - 44) / 4.3, 50);
+      const hauteur = 4 * sr + 14;
+      const y0 = g.haut + (y + h - g.haut - hauteur) / 2 + sr;
+      g.sr = sr;
+      g.cadrans = CADRANS.map((o, i) => ({ x: 16 + sr + (i % 3) * (2 * sr + 10), y: y0 + Math.floor(i / 3) * (2 * sr + 14) }));
+      // afficheur de données et voyants à droite du volant
+      const px = cx + g.rw + 16, pw = W - 16 - px, bande = 40;
+      g.lcd = { x: px, y: g.haut + 10, w: pw, h: y + h - 12 - bande - (g.haut + 10) };
+      g.rv = clamp(pw / VOYANTS.length * 0.16, 5, 9);
+      g.voyants = VOYANTS.map((o, i) => ({ x: px + pw * (i + 0.5) / VOYANTS.length, y: y + h - 12 - bande + g.rv + 6 }));
+      const rh = clamp(g.lcd.h * 0.22, 26, 40);
+      g.radar = { x: px + pw - 8 - rh * 2.5, y: g.lcd.y + 7, w: rh * 2.5, h: rh };
+      g.l0 = g.lcd.y + rh + 16;
+      const dispo = g.lcd.y + g.lcd.h - 6 - g.l0;
+      const nb = clamp(Math.floor(dispo / 14), 3, LIGNES_LCD.length);
+      g.lignes = LIGNES_LCD.slice(0, nb);
+      g.lh = dispo / nb;
+    } else {
+      // téléphone : deux boîtiers de données de part et d'autre du compte-tours
+      g.cadrans = [];
+      const by = g.ty - rt * 0.35, bh = Math.min(h * 0.28, y + h - 96 - by);
+      g.boites = [
+        { x: 8, y: by, w: cx - rt * 1.08 - 12, h: bh },
+        { x: cx + rt * 1.44 + 6, y: by, w: W - 14 - (cx + rt * 1.44), h: bh }
+      ];
+      g.rv = 6;
+      g.voyants = VOYANTS.map((o, i) => ({ x: 18 + i * 20, y: g.haut + 12 }));
+      g.radar = { x: W - 100, y: y - 46, w: 92, h: 34 };
+    }
   }
 
-  function dessinerJauge(cx, cy, r, o){
-    const a0 = PI * 0.75, sweep = PI * 1.5;
-    const ang = val => a0 + clamp((val - o.min) / (o.max - o.min), 0, 1) * sweep;
-    // Cerclage métallique et vitre teintée, sans masquer les graduations.
-    const metal = dctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
-    metal.addColorStop(0, '#777a83');
-    metal.addColorStop(0.3, '#272a31');
-    metal.addColorStop(0.65, '#626570');
-    metal.addColorStop(1, '#191b20');
-    dctx.save();
-    dctx.shadowColor = 'rgba(0,0,0,.8)';
-    dctx.shadowBlur = r * 0.18;
-    dctx.beginPath(); dctx.arc(cx, cy, r, 0, TAU);
-    dctx.fillStyle = metal; dctx.fill();
-    dctx.restore();
-    dctx.beginPath(); dctx.arc(cx, cy, r * 0.94, 0, TAU);
-    const verre = dctx.createRadialGradient(cx - r * 0.25, cy - r * 0.4, 0, cx, cy, r);
-    verre.addColorStop(0, '#202630');
-    verre.addColorStop(0.55, '#0c1017');
-    verre.addColorStop(1, '#05070b');
-    dctx.fillStyle = verre; dctx.fill();
-    dctx.beginPath(); dctx.arc(cx, cy, r * 0.91, PI * 1.13, PI * 1.87);
-    dctx.strokeStyle = 'rgba(210,225,240,.22)';
-    dctx.lineWidth = Math.max(1, r * 0.016); dctx.stroke();
+  // ---------- Couche fixe ----------
+  let motifCarbone = null;
+  function carbone(c){
+    if (!motifCarbone){
+      // armure sergé 2/2 : cellules de 2 px alternées en diagonale
+      const m = document.createElement('canvas');
+      m.width = m.height = 8;
+      const x = m.getContext('2d');
+      for (let i = 0; i < 4; i++){
+        for (let j = 0; j < 4; j++){
+          const chaine = (i + j) % 4 < 2;
+          x.fillStyle = chaine ? '#2a2c31' : '#17181b';
+          x.fillRect(i * 2, j * 2, 2, 2);
+          x.fillStyle = chaine ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.25)';
+          x.fillRect(i * 2, j * 2, 2, 1);
+        }
+      }
+      motifCarbone = m;
+    }
+    return c.createPattern(motifCarbone, 'repeat');
+  }
+
+  // Fixation quart de tour (Dzus).
+  function fixation(c, x, y, r){
+    c.beginPath(); c.arc(x, y, r + 1, 0, TAU); c.fillStyle = '#050506'; c.fill();
+    const gr = c.createRadialGradient(x - r * 0.4, y - r * 0.4, 0, x, y, r);
+    gr.addColorStop(0, '#d2d5da'); gr.addColorStop(1, '#55585f');
+    c.beginPath(); c.arc(x, y, r, 0, TAU); c.fillStyle = gr; c.fill();
+    c.beginPath(); c.moveTo(x - r * 0.7, y + r * 0.25); c.lineTo(x + r * 0.7, y - r * 0.25);
+    c.strokeStyle = '#26282d'; c.lineWidth = Math.max(1, r * 0.3); c.stroke();
+  }
+
+  // Étiquette en ruban Dymo (lettres blanches en relief sur ruban noir).
+  function dymo(c, x, y, texte, taille){
+    c.font = 'bold ' + taille + 'px ' + POLICE;
+    const w = c.measureText(texte).width + taille * 0.9, h = taille * 1.5;
+    c.fillStyle = '#0b0b0d'; c.fillRect(x - w / 2, y - h / 2, w, h);
+    c.fillStyle = 'rgba(255,255,255,.1)'; c.fillRect(x - w / 2, y - h / 2, w, 1);
+    c.fillStyle = '#e6e6e0'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(texte, x, y + 0.5);
+  }
+
+  // Logement encastré (afficheurs) : cadre alu, joint noir, ombre interne.
+  function logement(c, x, y, w, h, r, fond){
+    c.beginPath(); rectArrondi(c, x - 3, y - 3, w + 6, h + 6, r + 3);
+    const alu = c.createLinearGradient(0, y - 3, 0, y + h + 3);
+    alu.addColorStop(0, '#6d7078'); alu.addColorStop(1, '#2a2c32');
+    c.fillStyle = alu; c.fill();
+    c.beginPath(); rectArrondi(c, x - 1, y - 1, w + 2, h + 2, r + 1); c.fillStyle = '#030304'; c.fill();
+    c.beginPath(); rectArrondi(c, x, y, w, h, r); c.fillStyle = fond; c.fill();
+    const gr = c.createLinearGradient(0, y, 0, y + Math.min(14, h * 0.35));
+    gr.addColorStop(0, 'rgba(0,0,0,.65)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = gr; c.fill();
+  }
+
+  // Monture chromée d'une lampe ou d'un voyant.
+  function monture(c, x, y, r){
+    const gr = c.createLinearGradient(x - r, y - r, x + r, y + r);
+    gr.addColorStop(0, '#e2e4e8'); gr.addColorStop(0.5, '#6a6d74'); gr.addColorStop(1, '#2b2d32');
+    c.beginPath(); c.arc(x, y, r * 1.38, 0, TAU); c.fillStyle = gr; c.fill();
+    c.beginPath(); c.arc(x, y, r * 1.12, 0, TAU); c.fillStyle = '#060607'; c.fill();
+  }
+
+  // Face d'un cadran : boîtier, cerclage, graduations, chiffres, zone rouge.
+  function faceCadran(c, cx, cy, r, o, label, unite, grand){
+    c.save();
+    c.shadowColor = 'rgba(0,0,0,.85)'; c.shadowBlur = r * 0.2; c.shadowOffsetY = r * 0.06;
+    const chrome = c.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+    chrome.addColorStop(0, '#eceef2'); chrome.addColorStop(0.35, '#5d6068');
+    chrome.addColorStop(0.7, '#b9bcc3'); chrome.addColorStop(1, '#2a2c31');
+    c.beginPath(); c.arc(cx, cy, r * 1.07, 0, TAU); c.fillStyle = chrome; c.fill();
+    c.restore();
+    c.beginPath(); c.arc(cx, cy, r, 0, TAU); c.fillStyle = '#0c0d10'; c.fill();
+    const face = c.createRadialGradient(cx, cy - r * 0.2, r * 0.1, cx, cy, r * 0.95);
+    face.addColorStop(0, '#16181d'); face.addColorStop(1, '#07080a');
+    c.beginPath(); c.arc(cx, cy, r * 0.94, 0, TAU); c.fillStyle = face; c.fill();
+    // zone rouge peinte en bord de face
+    if (o.red){
+      c.beginPath(); c.arc(cx, cy, r * 0.86, angleCadran(o, o.red[0]), angleCadran(o, o.red[1]));
+      c.strokeStyle = '#b3171b'; c.lineWidth = r * (grand ? 0.08 : 0.1); c.stroke();
+    }
     // graduations
     for (let val = o.min; val <= o.max + 1e-6; val += o.minor){
-      const a = ang(val);
+      const a = angleCadran(o, val);
       const maj = Math.abs(val / o.major - Math.round(val / o.major)) < 1e-6;
-      dctx.beginPath();
-      dctx.moveTo(cx + Math.cos(a) * r * 0.88, cy + Math.sin(a) * r * 0.88);
-      dctx.lineTo(cx + Math.cos(a) * r * (maj ? 0.73 : 0.81), cy + Math.sin(a) * r * (maj ? 0.73 : 0.81));
-      dctx.strokeStyle = maj ? '#e6e6e6' : '#7d7d86';
-      dctx.lineWidth = maj ? Math.max(1.4, r * 0.032) : Math.max(1, r * 0.016);
-      dctx.stroke();
-      if (maj && o.nombres !== false){
-        const txt = String(Math.round(val / (o.div || 1)));
-        dctx.fillStyle = '#d6d6d6';
-        dctx.font = Math.max(7, r * 0.21) + 'px Consolas,"DejaVu Sans Mono",monospace';
-        dctx.textAlign = 'center'; dctx.textBaseline = 'middle';
-        dctx.fillText(txt, cx + Math.cos(a) * r * 0.57, cy + Math.sin(a) * r * 0.57);
+      const demi = !maj && Math.abs(2 * val / o.major - Math.round(2 * val / o.major)) < 1e-6;
+      const r1 = r * (maj ? 0.74 : demi ? 0.8 : 0.84);
+      c.beginPath();
+      c.moveTo(cx + Math.cos(a) * r * 0.9, cy + Math.sin(a) * r * 0.9);
+      c.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+      c.strokeStyle = maj ? '#f2f2ee' : '#a9aab0';
+      c.lineWidth = maj ? Math.max(1.5, r * (grand ? 0.028 : 0.04)) : Math.max(1, r * 0.014);
+      c.stroke();
+      if (maj){
+        c.fillStyle = '#f0f0ea';
+        c.font = 'bold ' + Math.max(7, r * (grand ? 0.15 : 0.2)) + 'px Arial,Helvetica,sans-serif';
+        c.textAlign = 'center'; c.textBaseline = 'middle';
+        c.fillText(String(Math.round(val / (o.div || 1))), cx + Math.cos(a) * r * (grand ? 0.6 : 0.56), cy + Math.sin(a) * r * (grand ? 0.6 : 0.56));
       }
     }
-    // zone rouge
-    if (o.red){
-      dctx.beginPath();
-      dctx.arc(cx, cy, r * 0.94, ang(o.red[0]), ang(o.red[1]));
-      dctx.strokeStyle = '#cc2020'; dctx.lineWidth = Math.max(2.2, r * 0.055); dctx.stroke();
+    // repère réglable du régime de passage (triangle orange sur le cerclage)
+    if (o.repere){
+      const a = angleCadran(o, o.repere);
+      c.save(); c.translate(cx + Math.cos(a) * r * 0.985, cy + Math.sin(a) * r * 0.985); c.rotate(a);
+      c.beginPath(); c.moveTo(-r * 0.075, -r * 0.045); c.lineTo(-r * 0.075, r * 0.045); c.lineTo(r * 0.02, 0); c.closePath();
+      c.fillStyle = '#ff8a1c'; c.fill();
+      c.restore();
     }
-    // Aiguille à contrepoids, avec une ombre courte sur le cadran.
-    const a = ang(o.val);
-    dctx.save(); dctx.translate(cx, cy); dctx.rotate(a);
-    dctx.shadowColor = 'rgba(0,0,0,.85)';
-    dctx.shadowBlur = r * 0.055;
-    dctx.shadowOffsetY = r * 0.035;
-    dctx.beginPath();
-    dctx.moveTo(-r * 0.24, -r * 0.045);
-    dctx.lineTo(r * 0.76, -r * 0.012);
-    dctx.lineTo(r * 0.84, 0);
-    dctx.lineTo(r * 0.76, r * 0.012);
-    dctx.lineTo(-r * 0.24, r * 0.045);
-    dctx.closePath();
-    dctx.fillStyle = o.couleurAiguille || '#ffb000'; dctx.fill();
-    dctx.shadowColor = 'transparent';
-    dctx.beginPath(); dctx.moveTo(r * 0.1, -r * 0.009); dctx.lineTo(r * 0.71, -r * 0.009);
-    dctx.strokeStyle = 'rgba(255,255,255,.55)'; dctx.lineWidth = Math.max(1, r * 0.015); dctx.stroke();
-    dctx.restore();
-    dctx.beginPath(); dctx.arc(cx, cy, r * 0.11, 0, TAU);
-    dctx.fillStyle = '#17191e'; dctx.fill();
-    dctx.strokeStyle = '#8a8c94'; dctx.lineWidth = 1.4; dctx.stroke();
-    dctx.beginPath(); dctx.arc(cx - r * 0.025, cy - r * 0.03, r * 0.03, 0, TAU);
-    dctx.fillStyle = '#5e616b'; dctx.fill();
-    // libellé + valeur numérique
-    dctx.textAlign = 'center'; dctx.textBaseline = 'middle';
-    dctx.fillStyle = '#9aa0ad';
-    dctx.font = Math.max(7, r * 0.19) + 'px Consolas,"DejaVu Sans Mono",monospace';
-    dctx.fillText(o.label, cx, cy + r * 0.4);
-    if (o.digital !== undefined){
-      dctx.fillStyle = o.couleurDigital || '#ffd27a';
-      dctx.font = 'bold ' + Math.max(8, r * 0.26) + 'px Consolas,"DejaVu Sans Mono",monospace';
-      dctx.fillText(o.digital, cx, cy + r * 0.63);
+    // butée de l'aiguille
+    const ab = A0 - 0.07;
+    c.beginPath(); c.arc(cx + Math.cos(ab) * r * 0.7, cy + Math.sin(ab) * r * 0.7, Math.max(1.5, r * 0.022), 0, TAU);
+    c.fillStyle = '#8a8c93'; c.fill();
+    // inscriptions
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillStyle = '#c9cbd0';
+    c.font = 'bold ' + Math.max(6.5, r * (grand ? 0.085 : 0.15)) + 'px Arial,Helvetica,sans-serif';
+    c.fillText(label, cx, cy - r * (grand ? 0.34 : 0.28), r * 0.72);   // largeur bornée sur les petits cadrans
+    c.fillStyle = '#8b8e96';
+    c.font = Math.max(6, r * (grand ? 0.075 : 0.13)) + 'px Arial,Helvetica,sans-serif';
+    c.fillText(unite, cx, cy + r * (grand ? -0.23 : 0.62), r * 0.6);
+    // lisière du verre
+    c.beginPath(); c.arc(cx, cy, r * 0.97, PI * 1.08, PI * 1.92);
+    c.strokeStyle = 'rgba(220,232,245,.2)'; c.lineWidth = Math.max(1, r * 0.018); c.stroke();
+  }
+
+  // Flancs de la coque vus depuis le baquet, peints à la couleur de la voiture.
+  function dessinerHabitacle(c, W, y, h, g){
+    const col = SETUP.carColor;
+    for (const s of [-1, 1]){
+      const x0 = s < 0 ? 0 : W, xi = x0 - s * W * 0.12, yh = y - h * 0.34;
+      c.beginPath();
+      c.moveTo(x0, g.haut + 6); c.lineTo(x0, yh);
+      c.quadraticCurveTo(x0 - s * W * 0.055, y - h * 0.14, xi, g.haut + 6);
+      c.closePath();
+      const gr = c.createLinearGradient(x0, 0, xi, 0);
+      gr.addColorStop(0, teinte(col, 0.42)); gr.addColorStop(0.65, teinte(col, 0.95)); gr.addColorStop(1, teinte(col, 0.7));
+      c.fillStyle = gr; c.fill();
+      // bourrelet de mousse sur le rebord du cockpit
+      c.beginPath(); c.moveTo(x0, yh);
+      c.quadraticCurveTo(x0 - s * W * 0.055, y - h * 0.14, xi, g.haut + 6);
+      c.lineCap = 'round';
+      c.lineWidth = Math.max(6, h * 0.045); c.strokeStyle = '#0d0d0f'; c.stroke();
+      c.lineWidth = Math.max(1, h * 0.008); c.strokeStyle = 'rgba(255,255,255,.14)'; c.stroke();
+      c.lineCap = 'butt';
     }
   }
 
-  function voyant(x, y, w, h, texte, allume, couleur){
-    dctx.fillStyle = allume ? couleur : '#1a1a1e';
-    dctx.strokeStyle = allume ? '#fff' : '#3a3a42';
-    dctx.lineWidth = 1;
-    const r = 3;
+  function cheminPlanche(c, W, H, g, ferme){
+    const lb = g.rt * 1.8;
+    c.beginPath();
+    if (ferme){ c.moveTo(0, H); c.lineTo(0, g.haut); } else c.moveTo(0, g.haut);
+    c.lineTo(g.cx - lb, g.haut);
+    c.bezierCurveTo(g.cx - lb * 0.55, g.haut, g.cx - lb * 0.62, g.bosse, g.cx, g.bosse);
+    c.bezierCurveTo(g.cx + lb * 0.62, g.bosse, g.cx + lb * 0.55, g.haut, g.cx + lb, g.haut);
+    c.lineTo(W, g.haut);
+    if (ferme){ c.lineTo(W, H); c.closePath(); }
+  }
+
+  function construireFond(){
+    const W = cssW, H = cssH, g = dash.g, y = dash.y, h = dash.H;
+    dash.fondY = Math.floor(y - h * 0.42);
+    if (!dash.fond) dash.fond = document.createElement('canvas');
+    const cv = dash.fond;
+    cv.width = Math.round(W * dpr); cv.height = Math.round((H - dash.fondY) * dpr);
+    const c = cv.getContext('2d');
+    c.setTransform(dpr, 0, 0, dpr, 0, -dash.fondY * dpr);
+    c.clearRect(0, dash.fondY, W, H - dash.fondY);
+
+    if (caméraMode === 0 && !dash.compact) dessinerHabitacle(c, W, y, h, g);
+
+    // planche en carbone, éclairée par le haut
+    c.save();
+    c.shadowColor = 'rgba(0,0,0,.9)'; c.shadowBlur = 16; c.shadowOffsetY = -3;
+    cheminPlanche(c, W, H, g, true);
+    c.fillStyle = '#111215'; c.fill();
+    c.restore();
+    cheminPlanche(c, W, H, g, true);
+    c.fillStyle = carbone(c); c.fill();
+    const lum = c.createLinearGradient(0, g.bosse, 0, H);
+    lum.addColorStop(0, 'rgba(255,255,255,.08)'); lum.addColorStop(0.25, 'rgba(0,0,0,0)'); lum.addColorStop(1, 'rgba(0,0,0,.6)');
+    c.fillStyle = lum; c.fill();
+    // jonc de protection sur l'arête
+    cheminPlanche(c, W, H, g, false);
+    c.lineWidth = 4; c.strokeStyle = '#060607'; c.stroke();
+    c.translate(0, 1.5);
+    cheminPlanche(c, W, H, g, false);
+    c.lineWidth = 1; c.strokeStyle = 'rgba(255,255,255,.2)'; c.stroke();
+    c.translate(0, -1.5);
+
+    // fixations de la casquette
+    const rf = Math.max(2.5, 3.6 * dash.k);
+    for (const s of [-1, 1]){
+      fixation(c, g.cx + s * g.rt * 0.55, g.bosse + 9, rf);
+      fixation(c, g.cx + s * g.rt * 1.62, g.haut + 7, rf);
+    }
+
+    // compte-tours et ses satellites
+    faceCadran(c, g.cx, g.ty, g.rt, TACHY, 'TR/MIN', '×1000', true);
+    logement(c, g.vitesse.x, g.vitesse.y, g.vitesse.w, g.vitesse.h, 2, '#120a02');
+    c.fillStyle = '#8b8e96'; c.font = Math.max(6, g.rt * 0.075) + 'px Arial,Helvetica,sans-serif';
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(SETUP.units === 'mph' ? 'MPH' : 'KM/H', g.cx, g.vitesse.y - g.rt * 0.08);
+    for (const l of g.lampes) monture(c, l.x, l.y, g.rl);
+    const tl = Math.max(7, g.rt * 0.085);
+    logement(c, g.rapport.x, g.rapport.y, g.rapport.w, g.rapport.h, 3, '#140304');
+    dymo(c, g.rapport.x + g.rapport.w / 2, g.rapport.y - tl * 1.3, 'RAP.', tl);
+    if (g.tour){
+      logement(c, g.tour.x, g.tour.y, g.tour.w, g.tour.h, 3, '#140304');
+      dymo(c, g.tour.x + g.tour.w / 2, g.tour.y - tl * 1.3, 'TOUR', tl);
+    }
+
+    // voyants
+    for (let i = 0; i < VOYANTS.length; i++){
+      const p = g.voyants[i];
+      monture(c, p.x, p.y, g.rv);
+      if (!dash.compact) dymo(c, p.x, p.y + g.rv * 1.38 + 9, VOYANTS[i].label, Math.max(7, 8 * dash.k));
+    }
+
+    if (!dash.compact){
+      CADRANS.forEach((o, i) => faceCadran(c, g.cadrans[i].x, g.cadrans[i].y, g.sr, o, o.label, o.unite, false));
+      // afficheur de données : fond d'écran électroluminescent
+      const L = g.lcd;
+      logement(c, L.x, L.y, L.w, L.h, 4, '#0d0803');
+      c.fillStyle = 'rgba(255,150,40,.035)';
+      for (let yy = L.y + 2; yy < L.y + L.h; yy += 3) c.fillRect(L.x + 2, yy, L.w - 4, 1);
+      c.font = Math.max(9, Math.min(12.5 * dash.k, g.lh * 0.66)) + 'px ' + POLICE;
+      c.textAlign = 'left'; c.textBaseline = 'middle'; c.fillStyle = '#8a5a1e';
+      g.lignes.forEach((lbl, i) => c.fillText(lbl, L.x + 10, g.l0 + g.lh * (i + 0.5)));
+      c.fillStyle = 'rgba(255,150,40,.12)'; c.fillRect(L.x + 8, g.l0 - 5, L.w - 16, 1);
+      fixation(c, L.x - 9, L.y + 4, rf); fixation(c, L.x + L.w + 9, L.y + 4, rf);
+    } else {
+      for (const b of g.boites) logement(c, b.x, b.y, b.w, b.h, 4, '#0d0803');
+    }
+  }
+
+  // ---------- Éléments mobiles ----------
+  function pointe(cx, cy, r, o, val, couleur, fine){
+    const a = angleCadran(o, val);
+    dctx.save(); dctx.translate(cx, cy); dctx.rotate(a);
+    if (!fine){ dctx.shadowColor = 'rgba(0,0,0,.8)'; dctx.shadowBlur = r * 0.05; dctx.shadowOffsetY = r * 0.04; }
+    const e = fine ? 0.012 : 0.028;
     dctx.beginPath();
-    dctx.moveTo(x + r, y); dctx.lineTo(x + w - r, y); dctx.quadraticCurveTo(x + w, y, x + w, y + r);
-    dctx.lineTo(x + w, y + h - r); dctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    dctx.lineTo(x + r, y + h); dctx.quadraticCurveTo(x, y + h, x, y + h - r);
-    dctx.lineTo(x, y + r); dctx.quadraticCurveTo(x, y, x + r, y);
-    dctx.closePath(); dctx.fill(); dctx.stroke();
-    dctx.fillStyle = allume ? '#000' : '#7d7d86';
-    dctx.font = 'bold ' + Math.max(8, h * 0.58) + 'px Consolas,"DejaVu Sans Mono",monospace';
-    dctx.textAlign = 'center'; dctx.textBaseline = 'middle';
-    dctx.fillText(texte, x + w / 2, y + h / 2 + 0.5);
+    dctx.moveTo(0, -r * e * 1.3);
+    dctx.lineTo(r * 0.8, -r * e * 0.35);
+    dctx.lineTo(r * 0.87, 0);
+    dctx.lineTo(r * 0.8, r * e * 0.35);
+    dctx.lineTo(0, r * e * 1.3);
+    dctx.closePath();
+    dctx.fillStyle = couleur; dctx.fill();
+    if (!fine){
+      // contrepoids noir
+      dctx.beginPath(); rectArrondi(dctx, -r * 0.2, -r * 0.035, r * 0.2, r * 0.07, r * 0.03);
+      dctx.fillStyle = '#1b1c20'; dctx.fill();
+    }
+    dctx.restore();
+  }
+  function moyeu(cx, cy, r){
+    const gr = dctx.createRadialGradient(cx - r * 0.03, cy - r * 0.04, 0, cx, cy, r * 0.11);
+    gr.addColorStop(0, '#6a6d75'); gr.addColorStop(1, '#141518');
+    dctx.beginPath(); dctx.arc(cx, cy, r * 0.1, 0, TAU); dctx.fillStyle = gr; dctx.fill();
+  }
+  // Reflet du ciel sur le verre, qui glisse avec l'orientation de la voiture.
+  function refletVerre(cx, cy, r, ref){
+    if (ref.a < 0.01) return;
+    dctx.save();
+    dctx.beginPath(); dctx.arc(cx, cy, r * 0.94, 0, TAU); dctx.clip();
+    const d = ref.x * r;
+    const gr = dctx.createLinearGradient(cx - r + d, cy - r, cx + d, cy + r * 0.3);
+    gr.addColorStop(0, 'rgba(255,255,255,0)');
+    gr.addColorStop(0.42, 'rgba(255,255,255,' + ref.a + ')');
+    gr.addColorStop(0.5, 'rgba(255,255,255,' + ref.a * 0.35 + ')');
+    gr.addColorStop(0.62, 'rgba(255,255,255,0)');
+    dctx.fillStyle = gr; dctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    dctx.restore();
+  }
+  function lentille(x, y, r, couleur, allume){
+    if (allume){
+      const halo = dctx.createRadialGradient(x, y, 0, x, y, r * 2.8);
+      halo.addColorStop(0, hexA(couleur, 0.5)); halo.addColorStop(1, hexA(couleur, 0));
+      dctx.fillStyle = halo; dctx.fillRect(x - r * 2.8, y - r * 2.8, r * 5.6, r * 5.6);
+    }
+    const gr = dctx.createRadialGradient(x - r * 0.3, y - r * 0.35, 0, x, y, r);
+    gr.addColorStop(0, allume ? '#ffffff' : hexA(couleur, 0.4));
+    gr.addColorStop(0.35, allume ? couleur : hexA(couleur, 0.22));
+    gr.addColorStop(1, allume ? hexA(couleur, 0.85) : '#0a0a0c');
+    dctx.beginPath(); dctx.arc(x, y, r, 0, TAU); dctx.fillStyle = gr; dctx.fill();
+    dctx.beginPath(); dctx.ellipse(x - r * 0.35, y - r * 0.4, r * 0.32, r * 0.18, -0.6, 0, TAU);
+    dctx.fillStyle = 'rgba(255,255,255,.3)'; dctx.fill();
+  }
+
+  // Afficheur à 7 segments centré dans son logement (segments éteints en fantôme).
+  function afficheur7(f, texte, n, allume, eteint){
+    texte = String(texte).slice(-n).padStart(n, ' ');
+    const hc = Math.min(f.h * 0.68, (f.w - f.h * 0.25) / (n * 0.75 - 0.2));
+    const w = hc * 0.55, pas = hc * 0.75, e = hc * 0.065, jeu = hc * 0.03, h2 = hc / 2;
+    const x0 = f.x + (f.w - (n * pas - hc * 0.2)) / 2 + hc * 0.05, y0 = f.y + (f.h - hc) / 2;
+    const seg = (x, y, horiz, L) => {
+      dctx.beginPath();
+      if (horiz){
+        dctx.moveTo(x, y); dctx.lineTo(x + e, y - e); dctx.lineTo(x + L - e, y - e);
+        dctx.lineTo(x + L, y); dctx.lineTo(x + L - e, y + e); dctx.lineTo(x + e, y + e);
+      } else {
+        dctx.moveTo(x, y); dctx.lineTo(x + e, y + e); dctx.lineTo(x + e, y + L - e);
+        dctx.lineTo(x, y + L); dctx.lineTo(x - e, y + L - e); dctx.lineTo(x - e, y + e);
+      }
+      dctx.closePath(); dctx.fill();
+    };
+    dctx.save();
+    dctx.translate(x0, y0);
+    dctx.transform(1, 0, -0.1, 1, 0, 0);   // chiffres penchés
+    for (let i = 0; i < n; i++){
+      const m = SEPT_SEG[texte[i]] || 0, ox = i * pas;
+      const segs = [
+        [ox + jeu, 0, true, w - 2 * jeu], [ox + w, jeu, false, h2 - 2 * jeu], [ox + w, h2 + jeu, false, h2 - 2 * jeu],
+        [ox + jeu, hc, true, w - 2 * jeu], [ox, h2 + jeu, false, h2 - 2 * jeu], [ox, jeu, false, h2 - 2 * jeu],
+        [ox + jeu, h2, true, w - 2 * jeu]
+      ];
+      for (let s = 0; s < 7; s++){
+        dctx.fillStyle = (m >> s) & 1 ? allume : eteint;
+        seg(segs[s][0], segs[s][1], segs[s][2], segs[s][3]);
+      }
+    }
+    dctx.restore();
+  }
+
+  function dessinerMiniRadar(rx, ry, rw, rh){
+    dctx.save();
+    const rRad = rh * 0.44;
+    dctx.fillStyle = 'rgba(8,6,3,0.9)'; dctx.strokeStyle = 'rgba(255,150,40,.3)'; dctx.lineWidth = 1;
+    dctx.beginPath(); rectArrondi(dctx, rx, ry, rw, rh, rRad); dctx.fill(); dctx.stroke();
+    dctx.strokeStyle = 'rgba(255,170,70,.25)'; dctx.lineWidth = 2;
+    dctx.beginPath(); rectArrondi(dctx, rx + 5, ry + 4, rw - 10, rh - 8, rRad * 0.7); dctx.stroke();
+    dctx.strokeStyle = '#cc3030';
+    dctx.beginPath(); dctx.moveTo(rx + rw * 0.5, ry + rh - 6); dctx.lineTo(rx + rw * 0.5, ry + rh - 2); dctx.stroke();
+    for (let i = 0; i < voitures.length; i++){
+      const vi = voitures[i];
+      if (vi.dnf) continue;
+      const frac = ((vi.s % LEN) + LEN) % LEN / LEN;
+      let px, py;
+      if (frac < 0.25){ px = lerp(rx + rw * 0.5, rx + rw - rRad, frac / 0.25); py = ry + rh - 4; }
+      else if (frac < 0.5){
+        const a = -PI / 2 + (frac - 0.25) / 0.25 * PI;
+        px = (rx + rw - rRad) + Math.sin(a) * (rRad - 3); py = (ry + rh * 0.5) + Math.cos(a) * (rRad - 3);
+      } else if (frac < 0.75){ px = lerp(rx + rw - rRad, rx + rRad, (frac - 0.5) / 0.25); py = ry + 4; }
+      else {
+        const a = PI / 2 + (frac - 0.75) / 0.25 * PI;
+        px = (rx + rRad) + Math.sin(a) * (rRad - 3); py = (ry + rh * 0.5) + Math.cos(a) * (rRad - 3);
+      }
+      dctx.beginPath();
+      dctx.arc(px, py, vi.joueur ? 3 : 1.7, 0, TAU);
+      dctx.fillStyle = vi.joueur ? '#35e06a' : vi.pos === 1 ? '#ffd27a' : '#c98a3c';
+      dctx.fill();
+    }
+    dctx.restore();
+  }
+
+  // Gant du pilote serré sur la jante (repère local : x tangent, y vers l'extérieur).
+  // On voit le dos de la main ; les doigts s'enroulent sur la jante vers la
+  // planche et le pouce repose sur la branche, côté intérieur.
+  function gant(x, y, rot, r, s){
+    dctx.save(); dctx.translate(x, y); dctx.rotate(rot);
+    const L = r * 0.15, E = r * 0.075;
+    const cuir = (y0, y1) => {
+      const gr = dctx.createLinearGradient(0, y0, 0, y1);
+      gr.addColorStop(0, '#6b6e77'); gr.addColorStop(0.55, '#34363d'); gr.addColorStop(1, '#16171b');
+      return gr;
+    };
+    // pouce, vers l'intérieur du volant
+    dctx.beginPath(); dctx.ellipse(-s * L * 0.55, -E * 1.35, L * 0.42, E * 0.55, -s * 0.5, 0, TAU);
+    dctx.fillStyle = cuir(-E * 1.9, -E * 0.8); dctx.fill();
+    dctx.strokeStyle = 'rgba(0,0,0,.6)'; dctx.lineWidth = 1; dctx.stroke();
+    // dos de la main
+    dctx.beginPath(); dctx.ellipse(-s * L * 0.1, -E * 0.35, L * 1.02, E * 1.25, 0, 0, TAU);
+    dctx.fillStyle = cuir(-E * 1.6, E); dctx.fill();
+    dctx.stroke();
+    // quatre doigts repliés par-dessus la jante
+    for (let i = 0; i < 4; i++){
+      const fx = -s * L * 0.1 + (i - 1.5) * L * 0.5;
+      dctx.beginPath(); rectArrondi(dctx, fx - L * 0.23, -E * 0.1, L * 0.46, E * 1.45, L * 0.22);
+      dctx.fillStyle = cuir(-E * 0.1, E * 1.35); dctx.fill();
+      dctx.stroke();
+    }
+    // empiècement de daim sur les phalanges
+    dctx.beginPath(); rectArrondi(dctx, -s * L * 0.1 - L * 0.85, -E * 0.55, L * 1.7, E * 0.42, E * 0.2);
+    dctx.fillStyle = 'rgba(210,212,218,.35)'; dctx.fill();
+    dctx.restore();
+  }
+
+  // Volant de 1989 : jante gainée de daim, trois branches alu ajourées, gants du pilote.
+  function dessinerVolant(cx, cy, r, angle, H){
+    const combi = SETUP.carColor;
+    // branches et moyeu (tournent avec le volant)
+    dctx.save(); dctx.translate(cx, cy); dctx.rotate(angle);
+    for (const a of [PI, 0, PI / 2]){
+      dctx.save(); dctx.rotate(a);
+      const alu = dctx.createLinearGradient(0, -r * 0.1, 0, r * 0.1);
+      alu.addColorStop(0, '#a3a8b0'); alu.addColorStop(0.45, '#e4e7eb'); alu.addColorStop(1, '#5e636b');
+      dctx.beginPath();
+      dctx.moveTo(r * 0.15, -r * 0.1); dctx.lineTo(r * 0.92, -r * 0.055);
+      dctx.lineTo(r * 0.92, r * 0.055); dctx.lineTo(r * 0.15, r * 0.1); dctx.closePath();
+      dctx.fillStyle = alu; dctx.fill();
+      dctx.strokeStyle = 'rgba(0,0,0,.55)'; dctx.lineWidth = 1; dctx.stroke();
+      for (const d of [0.4, 0.63]){
+        dctx.beginPath(); dctx.arc(r * d, 0, r * 0.03, 0, TAU); dctx.fillStyle = '#0a0b0d'; dctx.fill();
+      }
+      dctx.restore();
+    }
+    const hub = dctx.createRadialGradient(-r * 0.05, -r * 0.05, 0, 0, 0, r * 0.2);
+    hub.addColorStop(0, '#3b3d43'); hub.addColorStop(1, '#0c0c0e');
+    dctx.beginPath(); dctx.arc(0, 0, r * 0.15, 0, TAU); dctx.fillStyle = hub; dctx.fill();
+    dctx.beginPath(); dctx.arc(0, r * 0.05, r * 0.04, 0, TAU); dctx.fillStyle = '#b8141a'; dctx.fill();   // bouton radio
+    dctx.restore();
+    // jante (symétrique : éclairage fixe, venu du haut)
+    dctx.beginPath(); dctx.arc(cx, cy, r * 0.95, 0, TAU);
+    dctx.lineWidth = r * 0.1; dctx.strokeStyle = '#25252a'; dctx.stroke();
+    dctx.beginPath(); dctx.arc(cx, cy, r * 0.925, PI * 1.12, PI * 1.88);
+    dctx.lineWidth = r * 0.025; dctx.strokeStyle = 'rgba(255,255,255,.16)'; dctx.stroke();
+    dctx.beginPath(); dctx.arc(cx, cy, r * 0.99, PI * 0.1, PI * 0.9);
+    dctx.lineWidth = r * 0.02; dctx.strokeStyle = 'rgba(0,0,0,.5)'; dctx.stroke();
+    // ruban jaune au point milieu, repère du volant droit
+    dctx.beginPath(); dctx.arc(cx, cy, r * 0.95, -PI / 2 + angle - 0.04, -PI / 2 + angle + 0.04);
+    dctx.lineWidth = r * 0.1; dctx.strokeStyle = '#e3bd1c'; dctx.stroke();
+    // avant-bras (combinaison) puis gants, mains à 9 h 15
+    for (const s of [-1, 1]){
+      const a = (s < 0 ? PI + 0.2 : -0.2) + angle;
+      const gx = cx + Math.cos(a) * r * 0.95, gy = cy + Math.sin(a) * r * 0.95;
+      const ex = cx + s * r * 1.02 + (gx - (cx + s * r * 0.93)) * 0.5, ey = H + r * 0.35;   // le coude suit la main
+      const dx = ex - gx, dy = ey - gy, n = Math.hypot(dx, dy) || 1, nx = -dy / n, ny = dx / n;
+      const w0 = r * 0.09, w1 = r * 0.19;
+      const manche = dctx.createLinearGradient(gx + nx * w1, gy + ny * w1, gx - nx * w1, gy - ny * w1);
+      manche.addColorStop(0, teinte(combi, 0.35)); manche.addColorStop(0.5, teinte(combi, 0.8)); manche.addColorStop(1, teinte(combi, 0.3));
+      dctx.beginPath();
+      dctx.moveTo(gx + nx * w0, gy + ny * w0); dctx.lineTo(ex + nx * w1, ey + ny * w1);
+      dctx.lineTo(ex - nx * w1, ey - ny * w1); dctx.lineTo(gx - nx * w0, gy - ny * w0); dctx.closePath();
+      dctx.fillStyle = manche; dctx.fill();
+      // bande blanche de la combinaison
+      dctx.beginPath(); dctx.moveTo(gx + nx * w0 * 0.2, gy + ny * w0 * 0.2); dctx.lineTo(ex + nx * w1 * 0.2, ey + ny * w1 * 0.2);
+      dctx.lineWidth = r * 0.025; dctx.strokeStyle = 'rgba(240,240,240,.55)'; dctx.stroke();
+      gant(gx, gy, a - PI / 2, r, s);
+    }
   }
 
   function dessinerTableauDeBord(dt){
@@ -2879,238 +3943,139 @@
     dctx.clearRect(0, 0, W, H);
     const v = voitureJoueur;
     if (!v || course.mode === 'menu' || course.phase === 'idle') return;
-    const compact = W < 680;
-    const y = dash.y, h = dash.H, k = dash.k;
-    const cy = y + h * 0.5;
-    dessinerPanneau(W, H, y, h);
+    const g = dash.g, y = dash.y, h = dash.H, k = dash.k, rt = g.rt;
+    const cockpit = caméraMode === 0 && !dash.compact;
+    const cle = [W, H, dpr, cockpit, SETUP.carColor, SETUP.units].join('|');
+    if (cle !== dash.cleFond){ construireFond(); dash.cleFond = cle; }
+    if (dash.balayage > 0) dash.balayage = Math.max(0, dash.balayage - dt);
+    if (course.phase === 'verte') dash.telltale = Math.max(dash.telltale, v.rpm);
 
-    const mph = SETUP.units === 'mph';
-    const vmax = mph ? 260 : 420;
-    const vdisp = v.vitesse * 3.6 / (mph ? 1.609344 : 1);
-    const R = compact ? Math.min(52, h * 0.3) : Math.min(dash.bigR, h * 0.34);
-
-    // grands cadrans : compte-tours et vitesse
-    dessinerJauge(W / 2 - R * 1.5, cy, R, {
-      min: 0, max: 12000, val: aiguille('rpm', v.rpm, 6, dt),
-      major: 1000, minor: 250, div: 1000, red: [11000, 12000],
-      label: 'TR/MIN', digital: Math.round(v.rpm)
-    });
-    dessinerJauge(W / 2 + R * 1.5, cy, R, {
-      min: 0, max: vmax, val: aiguille('vit', vdisp, 4, dt),
-      major: mph ? 40 : 80, minor: mph ? 20 : 40,
-      label: mph ? 'MPH' : 'KM/H', digital: Math.round(vdisp)
-    });
-
-    // Alertes du Spotter (angle mort)
-    if (spotterInside){
-      const flk = Math.sin(performance.now() * 0.02) > 0;
-      dctx.save();
-      dctx.fillStyle = flk ? '#ffd23a' : '#e08a00';
-      dctx.shadowColor = '#ffb000'; dctx.shadowBlur = 12 * k;
-      const sx = W / 2 - R * 2.8, sy = cy;
-      dctx.beginPath();
-      dctx.moveTo(sx, sy); dctx.lineTo(sx + 22 * k, sy - 13 * k); dctx.lineTo(sx + 22 * k, sy + 13 * k);
-      dctx.closePath(); dctx.fill();
-      dctx.fillStyle = '#08080a'; dctx.font = 'bold ' + Math.max(7, 8.5 * k) + 'px Consolas,monospace';
-      dctx.textAlign = 'right'; dctx.textBaseline = 'middle';
-      dctx.fillText('INT', sx + 19 * k, sy);
-      dctx.restore();
+    // vibrations du moteur et chocs transmis à la planche
+    if (dt > 0){
+      const vib = clamp(v.rpm / 12000, 0, 1) * 0.6 + secousse * 6;
+      dash.ox = (Math.random() - 0.5) * vib * 0.5;
+      dash.oy = (Math.random() - 0.5) * vib;
     }
-    if (spotterOutside){
-      const flk = Math.sin(performance.now() * 0.02) > 0;
-      dctx.save();
-      dctx.fillStyle = flk ? '#ffd23a' : '#e08a00';
-      dctx.shadowColor = '#ffb000'; dctx.shadowBlur = 12 * k;
-      const sx = W / 2 + R * 2.8, sy = cy;
-      dctx.beginPath();
-      dctx.moveTo(sx, sy); dctx.lineTo(sx - 22 * k, sy - 13 * k); dctx.lineTo(sx - 22 * k, sy + 13 * k);
-      dctx.closePath(); dctx.fill();
-      dctx.fillStyle = '#08080a'; dctx.font = 'bold ' + Math.max(7, 8.5 * k) + 'px Consolas,monospace';
-      dctx.textAlign = 'left'; dctx.textBaseline = 'middle';
-      dctx.fillText('EXT', sx - 19 * k, sy);
-      dctx.restore();
-    }
+    const rel = normAngle(AZ_SOLEIL - v.phi);
+    const reflet = { a: 0.03 + 0.1 * Math.max(0, -Math.cos(rel)), x: Math.sin(rel) * 0.45 };
 
-    // boîte de vitesses + voyants de changement
-    const gw = 54 * k, gh = 42 * k, gx = W / 2 - gw / 2, gy = y + h * 0.5 - gh / 2;
-    dctx.fillStyle = '#555861'; dctx.fillRect(gx - 2 * k, gy - 2 * k, gw + 4 * k, gh + 4 * k);
-    dctx.fillStyle = '#070a0a'; dctx.fillRect(gx, gy, gw, gh);
-    dctx.fillStyle = 'rgba(255,255,255,.12)'; dctx.fillRect(gx + 2 * k, gy + 2 * k, gw - 4 * k, 1);
-    dctx.fillStyle = '#eec67d';
-    dctx.font = 'bold ' + (gh * 0.72) + 'px Consolas,"DejaVu Sans Mono",monospace';
-    dctx.textAlign = 'center'; dctx.textBaseline = 'middle';
-    dctx.fillText(String(v.gear), W / 2, gy + gh * 0.54);
-    dctx.fillStyle = '#a7a8ac'; dctx.font = Math.max(7, 9 * k) + 'px Consolas,monospace';
-    dctx.fillText('RAPPORT', W / 2, gy - 34 * k);
-    dctx.fillStyle = SETUP.trans === 'manual' ? '#35e06a' : '#8a90a0';
-    dctx.font = 'bold ' + Math.max(7, 9 * k) + 'px Consolas,monospace';
-    dctx.fillText(SETUP.trans === 'manual' ? 'MANU' : 'AUTO', W / 2, gy + gh + 14 * k);
+    dctx.save();
+    dctx.translate(dash.ox, dash.oy);
+    dctx.drawImage(dash.fond, 0, dash.fondY, W, H - dash.fondY);
+
+    // compte-tours : aiguille-témoin (régime maxi atteint) puis aiguille principale
     const frac = clamp(v.rpm / 12000, 0, 1);
-    dctx.fillStyle = '#0a0b0f';
-    dctx.strokeStyle = '#52535b'; dctx.lineWidth = 1;
-    dctx.fillRect(W / 2 - 43 * k, gy - 29 * k, 86 * k, 17 * k);
-    dctx.strokeRect(W / 2 - 43 * k, gy - 29 * k, 86 * k, 17 * k);
-    for (let i = 0; i < 5; i++){
-      const allumee = frac > 0.6 + i * 0.075;
-      const lx = W / 2 - 32 * k + i * 16 * k, ly = gy - 20.5 * k;
-      dctx.beginPath(); dctx.arc(lx, ly, 5.4 * k, 0, TAU);
-      dctx.fillStyle = '#030405'; dctx.fill();
-      dctx.save();
-      if (allumee){
-        dctx.shadowColor = i < 3 ? '#35e06a' : i === 3 ? '#ffb000' : '#ff4040';
-        dctx.shadowBlur = 9 * k;
-      }
-      dctx.beginPath(); dctx.arc(lx, ly, 3.8 * k, 0, TAU);
-      dctx.fillStyle = allumee ? (i < 3 ? '#35e06a' : i === 3 ? '#ffb000' : '#ff4040') : '#282c31';
-      dctx.fill();
-      dctx.restore();
-      dctx.beginPath(); dctx.arc(lx - 1.2 * k, ly - 1.2 * k, 1.1 * k, 0, TAU);
-      dctx.fillStyle = 'rgba(255,255,255,.25)'; dctx.fill();
-    }
+    const tremble = (Math.random() - 0.5) * 40 * frac * frac;
+    if (dash.telltale > TACHY.min) pointe(g.cx, g.ty, rt, TACHY, dash.telltale, '#d8261e', true);
+    pointe(g.cx, g.ty, rt, TACHY, aiguille('rpm', consigne(TACHY, v.rpm), 24, 0.5, dt) + tremble, '#ff8a1c', false);
+    moyeu(g.cx, g.ty, rt);
+    // vitesse (afficheur de la télémétrie) et rapport engagé
+    const vdisp = v.vitesse * 3.6 / (SETUP.units === 'mph' ? 1.609344 : 1);
+    afficheur7(g.vitesse, Math.round(vdisp), 3, '#ffb030', 'rgba(255,176,48,.07)');
+    afficheur7(g.rapport, v.gear, 1, '#ff3322', 'rgba(255,51,34,.07)');
+    if (g.tour) afficheur7(g.tour, tourAffiche(v), 3, '#ff3322', 'rgba(255,51,34,.07)');
+    // lampes de passage : orange à l'approche, rouge au régime de passage
+    const clignote = SETUP.trans === 'manual' && v.rpm > 12000 && Math.sin(performance.now() * 0.03) < 0;
+    const testLampes = dash.balayage > 0.9;            // test des ampoules à la mise du contact
+    lentille(g.lampes[0].x, g.lampes[0].y, g.rl, g.lampes[0].couleur, v.rpm > 10300 || testLampes);
+    lentille(g.lampes[1].x, g.lampes[1].y, g.rl, g.lampes[1].couleur, (v.rpm > 11100 && !clignote) || testLampes);
+    refletVerre(g.cx, g.ty, rt, reflet);
 
-    // petits cadrans à gauche
-    if (!compact){
-      const sr = Math.min(dash.smallR, (h - 34) / 6.2);
-      const x0 = 16 + sr, y0 = y + 16 + sr;
-      const dx = sr * 2 + 12, dy = sr * 2 + 6;
-      dessinerJauge(x0, y0, sr, { min: 0, max: 40, val: v.fuel, major: 10, minor: 5, div: 1, red: [0, 6], label: 'CARBURANT', digital: v.fuel.toFixed(1) });
-      dessinerJauge(x0 + dx, y0, sr, { min: 0, max: 100, val: v.oilP, major: 25, minor: 5, label: 'HUILE', digital: Math.round(v.oilP) });
-      dessinerJauge(x0, y0 + dy, sr, { min: 60, max: 130, val: v.water, major: 10, minor: 5, red: [115, 130], label: 'EAU °C', digital: Math.round(v.water) });
-      dessinerJauge(x0 + dx, y0 + dy, sr, { min: 60, max: 150, val: v.oil, major: 30, minor: 10, red: [135, 150], label: 'HUILE °C', digital: Math.round(v.oil) });
-      dessinerJauge(x0, y0 + dy * 2, sr, { min: 0, max: 60, val: v.boost * 60, major: 20, minor: 5, label: 'TURBO', digital: Math.round(v.boost * 60) });
-      dessinerJauge(x0 + dx, y0 + dy * 2, sr, { min: 0, max: 100, val: v.wear, major: 25, minor: 5, red: [80, 100], label: 'PNEUS %', digital: Math.round(v.wear), couleurAiguille: '#d0d0d8' });
-    }
-
-    // panneau numérique à droite
-    const j = v;
-    const tps = course.mode === 'race' ? fmtTime(course.temps) : fmtTime(course.temps);
-    const lignes = [
-      ['TOUR', (Math.min(course.tours, j.lap + 1)) + '/' + (course.mode === 'qualify' ? 4 : course.mode === 'race' ? course.tours : '—')],
-      ['POSITION', course.mode === 'race' ? j.pos + '/' + voitures.length : '—'],
-      ['TEMPS', tps],
-      ['DERNIER', fmtTime(j.lastLap)],
-      ['MEILLEUR', fmtTime(j.bestLap)],
-      ['ÉCART', course.mode === 'race' && course.classement[0] !== j ? fmtGap(ecartLeader(j)) : (course.mode === 'race' ? 'LEADER' : '—')],
-      ['ASPIRATION', j.draft > 0.06 ? Math.round(j.draft * 100) + ' %' : '—'],
-      ['ESSENCE', j.fuel.toFixed(1) + ' gal']
-    ];
-    const px = W / 2 + R * 2.62, pw = W - px - 16;
-    if (!compact && pw > 150){
-      const py = y + 14, ph = h - 28;
-      dctx.fillStyle = '#08080a'; dctx.strokeStyle = '#3a3a42'; dctx.lineWidth = 1.5;
-      dctx.fillRect(px, py, pw, ph); dctx.strokeRect(px, py, pw, ph);
-      const lh = Math.min(21 * k, (ph - 40) / lignes.length);
-      dctx.font = Math.max(10, 12.5 * k) + 'px Consolas,"DejaVu Sans Mono",monospace';
-      dctx.textBaseline = 'middle';
-      lignes.forEach((l, i) => {
-        const ly = py + 12 + lh * (i + 0.6);
-        dctx.textAlign = 'left'; dctx.fillStyle = '#8a90a0';
-        dctx.fillText(l[0], px + 12, ly);
-        dctx.textAlign = 'right'; dctx.fillStyle = l[0] === 'ASPIRATION' && j.draft > 0.25 ? '#35e06a' : '#ffd27a';
-        dctx.fillText(l[1], px + pw - 12, ly);
+    // cadrans secondaires
+    if (!dash.compact){
+      CADRANS.forEach((o, i) => {
+        let val = o.val(v);
+        if (o.cle === 'oilP') val += Math.sin(performance.now() * 0.021) * 1.5 * frac;   // pulsations de la pompe
+        const p = g.cadrans[i];
+        pointe(p.x, p.y, g.sr, o, aiguille(o.cle, consigne(o, val), 9, 0.65, dt), '#f4f1e8', false);
+        moyeu(p.x, p.y, g.sr);
+        refletVerre(p.x, p.y, g.sr, reflet);
       });
-      // voyants d'alerte
-      const vw = Math.min(52 * k, (pw - 30) / 5 - 4), vh = 15 * k;
-      const vx = px + 10, vy = py + ph - vh - 9;
-      voyant(vx + (vw + 4) * 0, vy, vw, vh, 'HUILE', j.oilP < 25, '#ff3030');
-      voyant(vx + (vw + 4) * 1, vy, vw, vh, 'EAU', j.water > 115, '#ff3030');
-      voyant(vx + (vw + 4) * 2, vy, vw, vh, 'CARB', j.fuel < 6, '#ffb000');
-      voyant(vx + (vw + 4) * 3, vy, vw, vh, 'DÉGÂTS', j.damage > 50, '#ff3030');
-      voyant(vx + (vw + 4) * 4, vy, vw, vh, 'PIT', j.pitActif, '#35e06a');
+    }
+    // voyants d'alerte
+    VOYANTS.forEach((o, i) => lentille(g.voyants[i].x, g.voyants[i].y, g.rv, o.couleur, o.test(v) || testLampes));
 
-      // Mini-radar sur le panneau droit
-      dessinerMiniRadar(px + pw - 106, py + 8, 96, 38);
+    // afficheur de données
+    const totalTours = course.mode === 'qualify' ? 4 : course.mode === 'race' ? course.tours : '—';
+    const val = {
+      POSITION: course.mode === 'race' ? v.pos + '/' + voitures.length : '—',
+      TOUR: tourAffiche(v) + '/' + totalTours,
+      'ÉCART': course.mode !== 'race' ? '—' : course.classement[0] === v ? 'LEADER' : ecartLeader(v),
+      DERNIER: fmtTime(v.lastLap),
+      MEILLEUR: fmtTime(v.bestLap),
+      ESSENCE: v.fuel.toFixed(1) + ' gal',
+      TEMPS: fmtTime(course.temps),
+      PNEUS: Math.round(v.wear) + ' %',
+      ASPIRATION: v.draft > 0.06 ? Math.round(v.draft * 100) + ' %' : '—'
+    };
+    const alerte = { ESSENCE: v.fuel < 6, PNEUS: v.wear > 80 };
+    if (!dash.compact){
+      const L = g.lcd;
+      dctx.textBaseline = 'middle';
+      dctx.textAlign = 'left'; dctx.fillStyle = '#ffb347';
+      dctx.font = 'bold ' + Math.round(g.radar.h * 0.72) + 'px ' + POLICE;
+      dctx.fillText(course.mode === 'race' ? 'P' + v.pos : course.mode === 'qualify' ? 'QUALIF' : 'ESSAIS', L.x + 10, g.radar.y + g.radar.h / 2 + 1);
+      dctx.textAlign = 'right';
+      dctx.font = Math.max(9, Math.min(12.5 * k, g.lh * 0.66)) + 'px ' + POLICE;
+      g.lignes.forEach((lbl, i) => {
+        dctx.fillStyle = alerte[lbl] ? '#ff4a3a' : lbl === 'ASPIRATION' && v.draft > 0.25 ? '#8dff7a' : '#ffb347';
+        dctx.fillText(val[lbl], L.x + L.w - 10, g.l0 + g.lh * (i + 0.5));
+      });
+      dessinerMiniRadar(g.radar.x, g.radar.y, g.radar.w, g.radar.h);
     } else {
-      // mode compact : une ligne d'infos sous les cadrans
-      dctx.textAlign = 'center'; dctx.textBaseline = 'middle';
-      dctx.font = 'bold ' + Math.max(11, 13 * k) + 'px Consolas,"DejaVu Sans Mono",monospace';
-      dctx.fillStyle = '#ffd27a';
-      const info = 'TOUR ' + Math.min(course.tours, j.lap + 1) + '/' + (course.mode === 'race' ? course.tours : course.mode === 'qualify' ? 4 : '—') +
-        '   POS ' + (course.mode === 'race' ? j.pos + '/' + voitures.length : '—') +
-        (j.draft > 0.15 ? '   ASP ' + Math.round(j.draft * 100) + '%' : '') +
-        '   CARB ' + j.fuel.toFixed(0) + '   PNEUS ' + Math.round(v.wear) + '%';
-      dctx.fillText(info, W / 2, y + h - 16);
-      // voyants réduits
-      const bx = W / 2 - 60;
-      voyant(bx, y + 6, 22, 14, 'H', j.oilP < 25, '#ff3030');
-      voyant(bx + 26, y + 6, 22, 14, 'E', j.water > 115, '#ff3030');
-      voyant(bx + 52, y + 6, 22, 14, 'C', j.fuel < 6, '#ffb000');
-      voyant(bx + 78, y + 6, 22, 14, 'P', j.pitActif, '#35e06a');
-
-      dessinerMiniRadar(W - 104, y + 8, 94, 34);
+      const [bg, bd] = g.boites;
+      const fs = Math.max(9, Math.min(12, bg.h / 4.6));
+      dctx.font = fs + 'px ' + POLICE; dctx.textAlign = 'left'; dctx.textBaseline = 'middle';
+      const ecrire = (b, lignes) => lignes.forEach((l, i) => {
+        dctx.fillStyle = l[1] ? '#ff4a3a' : '#ffb347';
+        dctx.fillText(l[0], b.x + 6, b.y + b.h * (i + 0.5) / lignes.length);
+      });
+      ecrire(bg, [['POS ' + val.POSITION], ['T ' + val.TOUR], ['ÉC ' + val['ÉCART']]]);
+      ecrire(bd, [['ESS ' + v.fuel.toFixed(0), alerte.ESSENCE], ['PNEU ' + Math.round(v.wear) + '%', alerte.PNEUS],
+        [v.draft > 0.15 ? 'ASP ' + Math.round(v.draft * 100) + '%' : '']]);
+      dessinerMiniRadar(g.radar.x, g.radar.y, g.radar.w, g.radar.h);
     }
 
-    function dessinerMiniRadar(rx, ry, rw, rh){
-      dctx.save();
-      dctx.fillStyle = 'rgba(8,10,14,0.85)';
-      dctx.strokeStyle = '#3d3f4a';
-      dctx.lineWidth = 1.2;
-      const rRad = rh * 0.44;
-      dctx.beginPath();
-      if (dctx.roundRect) dctx.roundRect(rx, ry, rw, rh, rRad);
-      else dctx.rect(rx, ry, rw, rh);
-      dctx.fill(); dctx.stroke();
-
-      // Piste
-      dctx.strokeStyle = 'rgba(255,255,255,0.18)';
-      dctx.lineWidth = 2;
-      dctx.beginPath();
-      if (dctx.roundRect) dctx.roundRect(rx + 5, ry + 4, rw - 10, rh - 8, rRad * 0.7);
-      else dctx.rect(rx + 5, ry + 4, rw - 10, rh - 8);
-      dctx.stroke();
-
-      // Briques d'arrivée
-      dctx.strokeStyle = '#cc3030'; dctx.lineWidth = 2;
-      dctx.beginPath();
-      dctx.moveTo(rx + rw * 0.5, ry + rh - 6); dctx.lineTo(rx + rw * 0.5, ry + rh - 2);
-      dctx.stroke();
-
-      // Voitures
-      for (let i = 0; i < voitures.length; i++){
-        const vi = voitures[i];
-        if (vi.dnf) continue;
-        const frac = ((vi.s % LEN) + LEN) % LEN / LEN;
-        let pxx = rx + rw * 0.5, pyy = ry + rh - 4;
-        if (frac < 0.25){
-          const t = frac / 0.25;
-          pxx = lerp(rx + rw * 0.5, rx + rw - rRad, t);
-          pyy = ry + rh - 4;
-        } else if (frac < 0.5){
-          const t = (frac - 0.25) / 0.25;
-          const a = -PI / 2 + t * PI;
-          pxx = (rx + rw - rRad) + Math.sin(a) * (rRad - 3);
-          pyy = (ry + rh * 0.5) + Math.cos(a) * (rRad - 3);
-        } else if (frac < 0.75){
-          const t = (frac - 0.5) / 0.25;
-          pxx = lerp(rx + rw - rRad, rx + rRad, t);
-          pyy = ry + 4;
-        } else {
-          const t = (frac - 0.75) / 0.25;
-          const a = PI / 2 + t * PI;
-          pxx = (rx + rRad) + Math.sin(a) * (rRad - 3);
-          pyy = (ry + rh * 0.5) + Math.cos(a) * (rRad - 3);
-        }
-        dctx.beginPath();
-        if (vi.joueur){
-          dctx.arc(pxx, pyy, 3.2, 0, TAU);
-          dctx.fillStyle = '#35e06a';
-        } else {
-          dctx.arc(pxx, pyy, 1.8, 0, TAU);
-          dctx.fillStyle = vi.pos === 1 ? '#ffb000' : '#cfd2d8';
-        }
-        dctx.fill();
+    // ombre portée du flanc de coque quand le soleil vient de côté
+    if (cockpit){
+      const cote = Math.sin(rel), l = W * 0.3 * Math.abs(cote);
+      if (l > 8){
+        const x0 = cote > 0 ? W : 0, x1 = cote > 0 ? W - l : l;
+        const om = dctx.createLinearGradient(x0, 0, x1, 0);
+        om.addColorStop(0, 'rgba(0,0,0,.3)'); om.addColorStop(1, 'rgba(0,0,0,0)');
+        dctx.fillStyle = om; dctx.fillRect(Math.min(x0, x1), g.bosse, l, H - g.bosse);
       }
+      // à haute vitesse le braquage est faible : le volant ne tourne que de quelques dizaines de degrés
+      dessinerVolant(g.cx, g.wy, g.rw, v.steer * (0.32 + 0.75 / (1 + v.vitesse / 15)), H);
+    }
+    dctx.restore();
+
+    // Alertes du spotter (voiture dans l'angle mort)
+    const ex = g.rw ? g.rw * 1.05 : rt * 2.2, ey = y - h * 0.2;
+    for (const [actif, s, txt] of [[spotterInside, -1, 'INT'], [spotterOutside, 1, 'EXT']]){
+      if (!actif) continue;
+      const sx = g.cx + s * ex;
+      dctx.save();
+      dctx.fillStyle = Math.sin(performance.now() * 0.02) > 0 ? '#ffd23a' : '#e08a00';
+      dctx.shadowColor = '#ffb000'; dctx.shadowBlur = 12 * k;
+      dctx.beginPath();
+      dctx.moveTo(sx + s * 12 * k, ey); dctx.lineTo(sx - s * 12 * k, ey - 14 * k); dctx.lineTo(sx - s * 12 * k, ey + 14 * k);
+      dctx.closePath(); dctx.fill();
+      dctx.shadowBlur = 0;
+      dctx.fillStyle = '#08080a'; dctx.font = 'bold ' + Math.max(7, 8.5 * k) + 'px ' + POLICE;
+      dctx.textAlign = 'center'; dctx.textBaseline = 'middle';
+      dctx.fillText(txt, sx - s * 3 * k, ey);
       dctx.restore();
     }
 
     // progression du service aux stands
-    if (j.pitActif){
-      const bw = Math.min(360, W - 80), bx = W / 2 - bw / 2, by = y - 46;
+    if (v.pitActif){
+      const bw = Math.min(360, W - 80), bx = W / 2 - bw / 2, by = (cockpit ? g.wy - g.rw : y) - 40;
       dctx.fillStyle = 'rgba(0,0,0,.7)'; dctx.fillRect(bx, by, bw, 22);
-      dctx.fillStyle = '#35e06a'; dctx.fillRect(bx, by, bw * clamp(j.pitTimer / 12, 0, 1), 22);
-      dctx.fillStyle = '#fff'; dctx.font = 'bold 13px Consolas,monospace';
+      dctx.fillStyle = '#35e06a'; dctx.fillRect(bx, by, bw * clamp(v.pitTimer / 12, 0, 1), 22);
+      dctx.fillStyle = '#fff'; dctx.font = 'bold 13px ' + POLICE;
       dctx.textAlign = 'center'; dctx.textBaseline = 'middle';
-      dctx.fillText('SERVICE ' + (12 - j.pitTimer).toFixed(1) + ' s', W / 2, by + 11);
+      dctx.fillText('SERVICE ' + (12 - v.pitTimer).toFixed(1) + ' s', W / 2, by + 11);
     }
   }
 
@@ -3174,8 +4139,18 @@
     } catch(e){ audioPret = false; }
   }
 
+  function appliquerVolume(){
+    if (master && actx) master.gain.setTargetAtTime(paused || muet ? 0 : 0.5, actx.currentTime, 0.03);
+  }
+
   function majAudio(){
-    if (!audioPret || !voitureJoueur || !actx) return;
+    if (!audioPret || !actx) return;
+    if (!voitureJoueur){
+      // retour au menu : on coupe les sons continus (moteur, vent, pneus…)
+      const t = actx.currentTime;
+      for (const g of [engGain, turboGain, ventGain, pneuGain, oppGain]) if (g) g.gain.setTargetAtTime(0, t, 0.08);
+      return;
+    }
     const v = voitureJoueur, t = actx.currentTime;
     const f = clamp(v.rpm / 60 * 2.2, 22, 900);
     for (const e of engOsc) e.o.frequency.setTargetAtTime(f * e.mult, t, 0.03);
@@ -3228,6 +4203,7 @@
     } catch(e){}
   }
   function sonTour(){ bip(880, 0.09, 0.05, 'square'); }
+  function sonFeu(){ bip(330, 0.16, 0.08, 'square'); }
   function sonPit(){ bip(520, 0.12, 0.07); setTimeout(() => bip(780, 0.14, 0.07), 130); }
   function sonDepart(){ bip(440, 0.18, 0.09); setTimeout(() => bip(660, 0.18, 0.09), 220); setTimeout(() => bip(990, 0.35, 0.1), 440); }
   function sonShift(){ bip(320, 0.04, 0.10, 'triangle'); }
@@ -3274,9 +4250,9 @@
   window.addEventListener('resize', resize);
 
   function majRecords(){
-    const lap = +(localStorage.getItem('indy500Lap') || 0);
-    const qual = +(localStorage.getItem('indy500Qual') || 0);
-    const race = +(localStorage.getItem('indy500Race') || 0);
+    const lap = stockage.nombre('indy500Lap', 0);
+    const qual = stockage.nombre('indy500Qual', 0);
+    const race = stockage.nombre('indy500Race', 0);
     recordsEl.innerHTML =
       'Meilleur tour : <b>' + (lap ? fmtTime(lap) : '—') + '</b>' +
       ' · Qualification (4 tours) : <b>' + (qual ? (qual > 100 ? qual.toFixed(2) + ' mph' : fmtTime(qual)) : '—') + '</b>' +
@@ -3299,7 +4275,7 @@
     if (course.phase === 'idle' || course.phase === 'fini') return;
     paused = !paused;
     pauseEl.classList.toggle('hidden', !paused);
-    if (master) master.gain.setTargetAtTime(paused ? 0 : (muet ? 0 : 0.5), actx.currentTime, 0.03);
+    appliquerVolume();
     if (paused) document.getElementById('pauseSub').textContent = sessionLbl.textContent;
   }
 
@@ -3309,16 +4285,25 @@
     setMessage(['Vue cockpit', 'Vue capot', 'Vue poursuite'][caméraMode], 1.5);
   }
 
+  function vueMenu(){
+    // vue d'ambiance derrière le menu
+    camera.up.set(0, 1, 0);
+    camera.fov = 72; camera.updateProjectionMatrix();
+    camera.position.set(-60, 4.2, 272);
+    camera.lookAt(160, 0.5, 286);
+  }
+
   function quitterSession(){
-    for (const v of voitures) scene.remove(v.groupe);
-    voitures = []; voitureJoueur = null;
+    libererVoitures();
+    voitureJoueur = null;
     verresMiroir.length = 0;
-    course.mode = 'menu'; course.phase = 'idle';
+    course.mode = 'menu'; course.phase = 'idle'; course.yellow = false; course.message = '';
     topbar.classList.add('hidden');
     pauseEl.classList.add('hidden'); resultEl.classList.add('hidden');
     menuEl.classList.remove('hidden');
     paused = false;
-    if (master) master.gain.setTargetAtTime(muet ? 0 : 0.5, actx.currentTime, 0.03);
+    appliquerVolume();
+    if (renderer) vueMenu();
     majRecords();
     resetParticules();
     majScoringPylon(0, true);
@@ -3333,26 +4318,34 @@
   }
 
   // ---------- Clavier ----------
+  // Touches en minuscules : avec Maj enfoncée (passage de rapport), relâcher
+  // « z » produit « Z » et laissait l'accélérateur bloqué.
+  const nomTouche = e => e.key.length === 1 ? e.key.toLowerCase() : e.key;
   document.addEventListener('keydown', e => {
-    const k = e.key;
+    const k = nomTouche(e);
     clavier[k] = true;
     if (k === 'ArrowUp' || k === 'ArrowDown' || k === ' ') e.preventDefault();
-    if (k === 'p' || k === 'P' || k === 'Escape'){ basculerPause(); return; }
-    if (k === 'c' || k === 'C') changerCamera();
-    if (k === 'm' || k === 'M'){
+    if (e.repeat) return;                    // pas de répétition automatique pour les actions
+    if (k === 'p' || k === 'Escape'){ basculerPause(); return; }
+    if (k === 'c') changerCamera();
+    if (k === 'm'){
       muet = !muet;
-      if (master) master.gain.setTargetAtTime(muet ? 0 : 0.5, actx.currentTime, 0.03);
+      appliquerVolume();
       setMessage(muet ? 'Son coupé' : 'Son activé', 1.5);
     }
-    if (k === 'r' || k === 'R') degagerVoiture();
+    if (k === 'r') degagerVoiture();
 
     // Changement de vitesse manuel au clavier
-    if (voitureJoueur && SETUP.trans === 'manual'){
-      if (k === 'Shift' || k === 'e' || k === 'E'){ e.preventDefault(); voitureJoueur.shiftUp(); }
-      else if (k === 'Control' || k === 'a' || k === 'A'){ e.preventDefault(); voitureJoueur.shiftDown(); }
+    if (voitureJoueur && SETUP.trans === 'manual' && course.phase !== 'fini'){
+      if (k === 'Shift' || k === 'e'){ e.preventDefault(); voitureJoueur.shiftUp(); }
+      else if (k === 'Control' || k === 'a'){ e.preventDefault(); voitureJoueur.shiftDown(); }
     }
   });
-  document.addEventListener('keyup', e => { clavier[e.key] = false; });
+  document.addEventListener('keyup', e => { clavier[nomTouche(e)] = false; });
+  // Onglet masqué : pause automatique (sinon la course continue à l'aveugle).
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && !paused && (course.phase === 'verte' || course.phase === 'compte')) basculerPause();
+  });
   window.addEventListener('blur', () => {
     for (const k of Object.keys(clavier)) clavier[k] = false;
     for (const k of Object.keys(touches)) touches[k] = false;
@@ -3423,6 +4416,38 @@
     paused = false;
     demarrerSession(modeCourant);
   });
+  // Réglages mémorisés d'une partie à l'autre.
+  const CLES_REGLAGES = ['wingF', 'wingR', 'boost', 'fuel', 'pressF', 'pressR', 'bias', 'carNum',
+    'trans', 'carColor', 'units', 'graphics', 'laps', 'diff'];
+  function sauverReglages(){
+    const r = {};
+    for (const c of CLES_REGLAGES) r[c] = SETUP[c];
+    stockage.ecrire('indy500Setup', JSON.stringify(r));
+  }
+  function chargerReglages(){
+    let r = null;
+    try { r = JSON.parse(stockage.lire('indy500Setup', 'null')); } catch(e){ r = null; }
+    if (!r || typeof r !== 'object') return;
+    for (const c of CLES_REGLAGES){
+      const el = document.getElementById(c);
+      if (!el || r[c] === undefined) continue;
+      // on ne reprend que les valeurs encore proposées par l'interface
+      if (el.tagName === 'SELECT'){
+        const val = c === 'carColor' ? '0x' + (+r[c]).toString(16).padStart(6, '0') : String(r[c]);
+        if (![...el.options].some(o => o.value === val)) continue;
+        el.value = val;
+      } else {
+        const n = +r[c];
+        if (!isFinite(n) || n < +el.min || n > +el.max) continue;
+        el.value = String(n);
+        const out = document.getElementById(c + 'O');
+        if (out) out.textContent = el.value;
+      }
+      SETUP[c] = c === 'carColor' ? parseInt(el.value) : (typeof SETUP[c] === 'number' ? +el.value : el.value);
+    }
+  }
+  chargerReglages();
+
   ['wingF', 'wingR', 'boost', 'fuel', 'pressF', 'pressR', 'bias'].forEach(id => {
     const el = document.getElementById(id), out = document.getElementById(id + 'O');
     el.addEventListener('input', () => { SETUP[id] = +el.value; out.textContent = el.value; majSetupInfo(); });
@@ -3445,7 +4470,7 @@
   // ---------- Pause / résultat ----------
   document.getElementById('pauseResume').addEventListener('click', basculerPause);
   document.getElementById('pauseRestart').addEventListener('click', () => {
-    pauseEl.classList.add('hidden'); paused = false;
+    pauseEl.classList.add('hidden'); paused = false;   // le volume est rétabli par demarrerSession
     demarrerSession(course.mode === 'menu' ? modeCourant : course.mode);
   });
   document.getElementById('pauseQuit').addEventListener('click', quitterSession);
@@ -3459,23 +4484,39 @@
   let lastTime = 0;
   function loop(now){
     requestAnimationFrame(loop);
-    if (qualiteEconomique() && now - lastTime < 1000 / 30) return;
+    // 30 i/s en mode économie (petite tolérance : les images à 60 Hz arrivent
+    // toutes les ~16,7 ms, un seuil strict en sautait une sur trois).
+    if (qualiteEconomique() && now - lastTime < 1000 / 30 - 4) return;
     const dt = Math.min(0.05, Math.max(0, (now - lastTime) / 1000));
     lastTime = now;
+    if (course.messageT > 0){
+      course.messageT -= paused ? 0 : dt;
+      if (course.messageT <= 0) course.message = '';
+    }
     if (paused){
+      // le bouton Start de la manette doit aussi pouvoir reprendre la partie
+      const gp = lireGamepad();
+      if (gp){
+        const b = !!(gp.buttons[9] && gp.buttons[9].pressed);
+        if (b && !gpPrevButtons['start']) basculerPause();
+        gpPrevButtons['start'] = b;
+      }
       dessinerTableauDeBord(0);
       if (renderer) renderer.render(scene, camera);
       return;
     }
-    if ((course.phase === 'verte' || course.phase === 'compte' || course.yellow) && renderer){
+    // Après l'arrivée ('fini'), la simulation continue : tour de décélération.
+    if (course.phase !== 'idle' && renderer){
       majCourse(dt);
       majAspirations(dt);
       for (const v of voitures){
-        const e = v.joueur ? entreeJoueur() : iaEntree(v, dt);
+        if (v.retire) continue;
+        const e = v.ia ? iaEntree(v, dt) : entreeJoueur();
         majVoiture(v, dt, e);
       }
       collisionsVoitures();
       for (const v of voitures){
+        if (v.retire) continue;
         const n = nearest(v.x, v.z, v.s);
         v.s = n.s; v.lat = n.lat;
         majModele(v, 0);
@@ -3487,7 +4528,7 @@
         spotterInside = false; spotterOutside = false;
         for (let i = 0; i < voitures.length; i++){
           const opp = voitures[i];
-          if (opp === j || opp.dnf) continue;
+          if (opp === j || opp.retire) continue;
           let ds = opp.s - j.s;
           if (ds < -LEN / 2) ds += LEN;
           if (ds > LEN / 2) ds -= LEN;
@@ -3513,6 +4554,7 @@
     if (renderer){
       majFeuxPortique(dt);
       majDrapeauStarter(dt);
+      majDecor(dt);
       majParticules(dt);
     }
     majAudio();
@@ -3536,16 +4578,18 @@
     construireCiel();
     construireSol();
     construirePiste();
+    construireTerrain();
     construireMurs();
     construireTribunes();
     construireStands();
     construirePanneauxDistance();
+    construireVegetation();
     construireInfield();
+    construirePostes();
+    construireHorizon();
     construireMonumentsIndy();
     initParticules();
-    // vue d'ambiance derrière le menu
-    camera.position.set(-60, 4.2, 272);
-    camera.lookAt(160, 0.5, 286);
+    vueMenu();
   }
   majRecords();
   majSetupInfo();
@@ -3555,7 +4599,8 @@
   // Point d'accès discret pour les tests automatisés / le débogage.
   window.__indy500 = {
     voitures: () => voitures, course: () => course, setup: () => SETUP,
-    trackAt: s => trackAt(s, {}), LEN: () => LEN, DEMI: DEMI, camera: () => camera
+    trackAt: s => trackAt(s, {}), LEN: () => LEN, DEMI: DEMI, camera: () => camera,
+    rendu: () => renderer && renderer.info.render
   };
 })();
 </script>

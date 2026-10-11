@@ -1,0 +1,2390 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
+<meta name="description" content="AGY — Showreel Motion Design 20 secondes : typographie cinétique, tesseract 4D, vortex particulaire, cockpit cybernétique et audio WebAudio temps réel."/>
+<meta name="theme-color" content="#05060b"/>
+<title>AGY — Showreel Motion Design 20s</title>
+<style>
+  /* ==========================================================================
+     STYLES GLOBAUX & THÈME NÉON CINÉMATIQUE
+     ========================================================================== */
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  :root {
+    --bg-dark: #05060b;
+    --cyan: #00f0ff;
+    --magenta: #ff007f;
+    --gold: #ffbe0b;
+    --purple: #8338ec;
+    --emerald: #00f5d4;
+    --text-main: #f0f4fc;
+    --text-muted: #8a96aa;
+    --glass-bg: rgba(10, 14, 24, 0.75);
+    --glass-border: rgba(255, 255, 255, 0.12);
+    --glass-glow: rgba(0, 240, 255, 0.25);
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--bg-dark);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--text-main);
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Canvas de rendu principal */
+  #viewport {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    z-index: 1;
+    background: #040508;
+    cursor: grab;
+  }
+  #viewport:active {
+    cursor: grabbing;
+  }
+
+  /* Bandes cinématographiques (Format Anamorphique 2.39:1) */
+  .letterbox {
+    position: fixed;
+    left: 0;
+    right: 0;
+    background: #000;
+    z-index: 10;
+    pointer-events: none;
+    transition: height 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  #letterbox-top { top: 0; height: 0; }
+  #letterbox-bottom { bottom: 0; height: 0; }
+
+  body.scope-active #letterbox-top,
+  body.scope-active #letterbox-bottom {
+    /* La hauteur est calculée dynamiquement par le script pour ratio 2.39:1 */
+  }
+
+  /* Scanlines & Grain cinéma */
+  #film-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.15) 0px,
+      rgba(0, 0, 0, 0.15) 1px,
+      transparent 1px,
+      transparent 2px
+    );
+    opacity: 0.4;
+  }
+
+  /* ==========================================================================
+     HUD & INTERFACE UTILISATEUR DU LECTEUR
+     ========================================================================== */
+  #hud-top {
+    position: fixed;
+    top: 16px;
+    left: 20px;
+    right: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 20;
+    pointer-events: none;
+    font-family: "Consolas", "Courier New", monospace;
+  }
+
+  .hud-badge {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--cyan);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+
+  .hud-badge .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ff0055;
+    box-shadow: 0 0 8px #ff0055;
+    animation: blink 1.2s infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  #act-pill {
+    color: #fff;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 3px 8px;
+    border-radius: 4px;
+    letter-spacing: 1px;
+  }
+
+  .hud-right {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .hud-btn {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: var(--text-main);
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-family: inherit;
+    letter-spacing: 1px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+  }
+  .hud-btn:hover {
+    background: rgba(0, 240, 255, 0.15);
+    border-color: var(--cyan);
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 0 14px rgba(0, 240, 255, 0.3);
+  }
+  .hud-btn.active {
+    background: rgba(0, 240, 255, 0.25);
+    border-color: var(--cyan);
+    color: var(--cyan);
+  }
+
+  /* Barre de contrôle inférieure (Scrubber & Actions) */
+  #controls-wrap {
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(1040px, calc(100% - 32px));
+    z-index: 25;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 14px;
+    padding: 10px 18px 12px;
+    box-shadow: 0 10px 35px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.05);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+
+  /* Scrubber temporel */
+  #timeline-container {
+    position: relative;
+    width: 100%;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+  }
+
+  #timeline-track {
+    position: relative;
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+  }
+
+  #timeline-buffered {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  #timeline-progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 0%;
+    background: linear-gradient(90deg, var(--cyan), var(--magenta), var(--gold));
+    box-shadow: 0 0 12px var(--cyan);
+  }
+
+  /* Marqueurs d'actes sur la timeline */
+  .act-marker {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.3);
+    pointer-events: none;
+  }
+
+  #timeline-thumb {
+    position: absolute;
+    top: 50%;
+    left: 0%;
+    transform: translate(-50%, -50%);
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid var(--cyan);
+    box-shadow: 0 0 12px var(--cyan);
+    pointer-events: none;
+    transition: transform 0.1s ease;
+  }
+  #timeline-container:hover #timeline-thumb {
+    transform: translate(-50%, -50%) scale(1.3);
+  }
+
+  /* Bulle de prévisualisation au survol de la timeline */
+  #timeline-tooltip {
+    position: absolute;
+    bottom: 30px;
+    left: 0;
+    transform: translateX(-50%);
+    background: rgba(10, 12, 18, 0.95);
+    border: 1px solid var(--cyan);
+    padding: 3px 8px;
+    border-radius: 5px;
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--cyan);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+  }
+
+  /* Ligne des boutons de commande */
+  #controls-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .ctrl-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ctrl-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-main);
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-family: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.15s ease;
+  }
+  .ctrl-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.25);
+    transform: translateY(-1px);
+  }
+  .ctrl-btn.primary {
+    background: linear-gradient(135deg, var(--cyan), #0099ff);
+    color: #040812;
+    border: none;
+    box-shadow: 0 0 16px rgba(0, 240, 255, 0.4);
+    font-weight: 700;
+  }
+  .ctrl-btn.primary:hover {
+    box-shadow: 0 0 24px rgba(0, 240, 255, 0.7);
+  }
+
+  .time-display {
+    font-family: "Consolas", monospace;
+    font-size: 13px;
+    color: #cfd8e8;
+    letter-spacing: 1px;
+    margin-left: 6px;
+  }
+  .time-current {
+    color: var(--cyan);
+    font-weight: 700;
+  }
+
+  /* Raccourcis d'actes */
+  .act-chips {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .act-chip {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-muted);
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-family: monospace;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .act-chip:hover {
+    border-color: var(--cyan);
+    color: #fff;
+  }
+  .act-chip.current {
+    background: rgba(0, 240, 255, 0.15);
+    border-color: var(--cyan);
+    color: var(--cyan);
+    font-weight: 700;
+  }
+
+  /* ==========================================================================
+     MODAL DE LANCEMENT & FIN DE SHOWREEL
+     ========================================================================== */
+  .modal-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at center, rgba(14, 18, 30, 0.88), rgba(4, 5, 8, 0.98));
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    padding: 24px;
+    transition: opacity 0.4s ease, visibility 0.4s ease;
+  }
+  .modal-screen.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .modal-card {
+    background: linear-gradient(180deg, rgba(22, 28, 48, 0.85), rgba(10, 13, 22, 0.95));
+    border: 1px solid rgba(0, 240, 255, 0.3);
+    box-shadow: 0 0 60px rgba(0, 240, 255, 0.15), 0 20px 60px rgba(0, 0, 0, 0.8);
+    border-radius: 20px;
+    padding: 38px 44px;
+    max-width: 640px;
+    width: 100%;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .modal-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--cyan), var(--magenta), var(--gold));
+  }
+
+  .modal-tag {
+    display: inline-block;
+    font-family: monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--cyan);
+    text-transform: uppercase;
+    background: rgba(0, 240, 255, 0.1);
+    border: 1px solid rgba(0, 240, 255, 0.25);
+    padding: 4px 14px;
+    border-radius: 20px;
+    margin-bottom: 16px;
+  }
+
+  .modal-title {
+    font-size: clamp(32px, 5vw, 46px);
+    font-weight: 900;
+    letter-spacing: 4px;
+    line-height: 1.1;
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, #ffffff 40%, var(--cyan) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .modal-desc {
+    color: #b0bed5;
+    font-size: 14.5px;
+    line-height: 1.7;
+    margin-bottom: 28px;
+  }
+
+  .modal-highlights {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 28px;
+    text-align: left;
+  }
+  .hl-box {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .hl-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--cyan);
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  .hl-sub {
+    font-size: 11px;
+    color: #8c9cb4;
+    line-height: 1.35;
+  }
+
+  .modal-play-btn {
+    padding: 16px 40px;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #030814;
+    background: linear-gradient(135deg, #00f0ff, #00b4d8);
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    box-shadow: 0 0 28px rgba(0, 240, 255, 0.5);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .modal-play-btn:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 0 45px rgba(0, 240, 255, 0.8);
+  }
+
+  .modal-shortcuts {
+    margin-top: 18px;
+    font-size: 11.5px;
+    color: #6d7d96;
+    letter-spacing: 0.5px;
+  }
+  .modal-shortcuts kbd {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: #dbe4f0;
+    font-family: monospace;
+    font-size: 10.5px;
+  }
+
+  /* Responsive Mobile */
+  @media (max-width: 768px) {
+    #hud-top { top: 10px; left: 10px; right: 10px; }
+    #controls-wrap { bottom: 10px; width: calc(100% - 20px); padding: 8px 12px; }
+    .act-chips { display: none; }
+    .modal-highlights { grid-template-columns: 1fr; }
+    .modal-card { padding: 26px 20px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Rendu WebGL / Canvas 2D haute fidélité -->
+<canvas id="viewport"></canvas>
+
+<!-- Cache d'image anamorphique 2.39:1 -->
+<div id="letterbox-top" class="letterbox"></div>
+<div id="letterbox-bottom" class="letterbox"></div>
+
+<!-- Effet grain de film & scanline optique -->
+<div id="film-overlay"></div>
+
+<!-- Barre d'état haute (HUD) -->
+<div id="hud-top">
+  <div class="hud-badge">
+    <div class="dot"></div>
+    <span>AGY // SHOWREEL 2026</span>
+    <span id="act-pill">ACT I : TYPOGRAPHIE</span>
+  </div>
+
+  <div class="hud-right">
+    <button id="btn-audio" class="hud-btn" title="Activer / Couper le son (M)">
+      <span id="audio-icon">🔊</span>
+      <span id="audio-text">AUDIO ON</span>
+    </button>
+    <button id="btn-scope" class="hud-btn" title="Format cinématographique 2.39:1">
+      <span>🎬</span>
+      <span id="scope-text">2.39:1</span>
+    </button>
+    <button id="btn-fullscreen" class="hud-btn" title="Plein écran (F)">
+      <span>⛶</span>
+    </button>
+  </div>
+</div>
+
+<!-- Barre de contrôle de lecture & timeline -->
+<div id="controls-wrap">
+  <!-- Scrubber interactif -->
+  <div id="timeline-container">
+    <div id="timeline-track">
+      <div id="timeline-buffered"></div>
+      <div id="timeline-progress"></div>
+      <!-- Délimiteurs des 5 actes -->
+      <div class="act-marker" style="left: 16%;"></div>
+      <div class="act-marker" style="left: 37.5%;"></div>
+      <div class="act-marker" style="left: 60%;"></div>
+      <div class="act-marker" style="left: 84%;"></div>
+    </div>
+    <div id="timeline-thumb"></div>
+    <div id="timeline-tooltip">00:00:00</div>
+  </div>
+
+  <!-- Boutons et données temporelles -->
+  <div id="controls-row">
+    <div class="ctrl-group">
+      <button id="btn-play" class="ctrl-btn primary" title="Lecture / Pause (Espace)">
+        <span id="play-icon">❚❚</span>
+        <span id="play-text">PAUSE</span>
+      </button>
+      <button id="btn-restart" class="ctrl-btn" title="Recommencer à 0s (R)">
+        <span>↺</span>
+      </button>
+      <div class="time-display">
+        <span id="time-curr" class="time-current">00:00:00</span> / <span id="time-dur">00:20:00</span>
+      </div>
+    </div>
+
+    <!-- Navigation directe par acte -->
+    <div class="act-chips">
+      <div class="act-chip current" data-time="0.0">01 TYPO</div>
+      <div class="act-chip" data-time="3.2">02 TESSERACT 4D</div>
+      <div class="act-chip" data-time="7.5">03 FLUIDE VORTEX</div>
+      <div class="act-chip" data-time="12.0">04 WARP TUNNEL</div>
+      <div class="act-chip" data-time="16.8">05 MONOLITHE AGY</div>
+    </div>
+
+    <!-- Vitesse de lecture -->
+    <div class="ctrl-group">
+      <button id="btn-speed" class="ctrl-btn" title="Vitesse de ralenti ou accéléré">1.0x</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal d'accueil & initialisation Audio -->
+<div id="modal-welcome" class="modal-screen">
+  <div class="modal-card">
+    <div class="modal-tag">PORTFOLIO // MOTION DESIGNER 2026</div>
+    <h1 class="modal-title">ANTIGRAVITY</h1>
+    <p class="modal-desc">
+      Showreel démonstratif de 20 secondes chorégraphié à 60 FPS.<br/>
+      Synthèse sonore WebAudio en temps réel, projection spatiale 4D, dynamique des fluides particulaire et graphisme vectoriel cinétique.
+    </p>
+
+    <div class="modal-highlights">
+      <div class="hl-box">
+        <div class="hl-title">01 // GÉOMÉTRIE 4D</div>
+        <div class="hl-sub">Tesseract hypercubique en rotation tensorielle continue</div>
+      </div>
+      <div class="hl-box">
+        <div class="hl-title">02 // PARTICULES</div>
+        <div class="hl-sub">2 500 agents conduits par un champ vectoriel curl-noise</div>
+      </div>
+      <div class="hl-box">
+        <div class="hl-title">03 // FUI & AUDIO</div>
+        <div class="hl-sub">HUD télémétrique réagissant au spectre audio temps réel</div>
+      </div>
+    </div>
+
+    <button id="btn-start-reel" class="modal-play-btn">▶ LANCER LE SHOWREEL</button>
+
+    <div class="modal-shortcuts">
+      <kbd>ESPACE</kbd> Play/Pause &nbsp;•&nbsp; <kbd>R</kbd> Rejouer &nbsp;•&nbsp; <kbd>M</kbd> Mute &nbsp;•&nbsp; <kbd>F</kbd> Plein écran &nbsp;•&nbsp; Glisser pour naviguer
+    </div>
+  </div>
+</div>
+
+<!-- Modal de fin de showreel -->
+<div id="modal-end" class="modal-screen hidden">
+  <div class="modal-card">
+    <div class="modal-tag">FIN DE SÉQUENCE // 00:20:00</div>
+    <h1 class="modal-title">AGY STUDIOS</h1>
+    <p class="modal-desc">
+      Merci d'avoir visionné le showreel !<br/>
+      20 secondes générées intégralement en code natif Vanilla JavaScript &amp; Canvas.
+    </p>
+
+    <button id="btn-replay-end" class="modal-play-btn" style="margin-bottom:12px;">↺ REVOIR LE SHOWREEL</button>
+    <br/>
+    <button id="btn-inspect-end" class="ctrl-btn" style="margin-top:8px;">EXPLORER LES SCÈNES LIBREMENT</button>
+  </div>
+</div>
+
+<script>
+/**
+ * ============================================================================
+ * AGY — SHOWREEL MOTION DESIGN 20S
+ * Direction Artistique & Code Créatif
+ * Entièrement autonome : Canvas 2D/3D mathématique, WebAudio natif, 0 CDN requis.
+ * ============================================================================
+ */
+(function() {
+  'use strict';
+
+  // --------------------------------------------------------------------------
+  // 1. CONFIGURATION & CONSTANTES DE PRODUCTION
+  // --------------------------------------------------------------------------
+  const TOTAL_DURATION = 20.0; // Durée exacte : 20.00 secondes
+  const BPM = 130;             // Tempo électro / cyberpunk synchronisé
+  const BEAT_DURATION = 60 / BPM; // ~0.4615 s par temps
+
+  // Découpage précis des 5 Actes cinématiques
+  const ACTS = [
+    { id: 1, name: 'ACT I : TYPOGRAPHIE CINÉTIQUE', start: 0.0, end: 3.2 },
+    { id: 2, name: 'ACT II : TESSERACT 4D & ANNEAUX', start: 3.2, end: 7.5 },
+    { id: 3, name: 'ACT III : FLUIDE & VORTEX COSMOS', start: 7.5, end: 12.0 },
+    { id: 4, name: 'ACT IV : WARP TUNNEL & FUI HUD', start: 12.0, end: 16.8 },
+    { id: 5, name: 'ACT V : MONOLITHE HERO & FINALE', start: 16.8, end: 20.0 }
+  ];
+
+  // État global du lecteur
+  const state = {
+    currentTime: 0.0,
+    isPlaying: false,
+    speed: 1.0,
+    isAudioMuted: false,
+    isScopeActive: true,
+    isDraggingScrubber: false,
+    mouse: { x: 0, y: 0, targetX: 0, targetY: 0, isDown: false },
+    shake: 0.0,
+    chroma: 0.0,
+    dpr: 1.0,
+    width: 0,
+    height: 0,
+    aspectRatio: 1.0
+  };
+
+  // --------------------------------------------------------------------------
+  // 2. MOTEUR AUDIO TEMPS RÉEL (WebAudio API pur sans fichiers externes)
+  // --------------------------------------------------------------------------
+  class AudioEngine {
+    constructor() {
+      this.ctx = null;
+      this.masterGain = null;
+      this.compressor = null;
+      this.analyser = null;
+      this.freqData = new Uint8Array(32);
+      this.isInitialized = false;
+      this.lastScheduledBeat = -1;
+    }
+
+    init() {
+      if (this.isInitialized) return;
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+
+      this.ctx = new AudioCtx();
+
+      // Compresseur de mastering pour punch radio moderne
+      this.compressor = this.ctx.createDynamicsCompressor();
+      this.compressor.threshold.setValueAtTime(-16, this.ctx.currentTime);
+      this.compressor.knee.setValueAtTime(10, this.ctx.currentTime);
+      this.compressor.ratio.setValueAtTime(8, this.ctx.currentTime);
+      this.compressor.attack.setValueAtTime(0.003, this.ctx.currentTime);
+      this.compressor.release.setValueAtTime(0.2, this.ctx.currentTime);
+
+      // Analyseur FFT pour visualisation HUD réactive
+      this.analyser = this.ctx.createAnalyser();
+      this.analyser.fftSize = 64;
+      this.analyser.smoothingTimeConstant = 0.8;
+
+      // Gain principal
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.setValueAtTime(state.isAudioMuted ? 0 : 0.85, this.ctx.currentTime);
+
+      // Connexion de la chaîne audio
+      this.compressor.connect(this.masterGain);
+      this.masterGain.connect(this.analyser);
+      this.analyser.connect(this.ctx.destination);
+
+      this.isInitialized = true;
+    }
+
+    resume() {
+      if (this.ctx && this.ctx.state === 'suspended') {
+        this.ctx.resume();
+      }
+    }
+
+    setMute(isMuted) {
+      if (!this.masterGain || !this.ctx) return;
+      const t = this.ctx.currentTime;
+      this.masterGain.gain.cancelScheduledValues(t);
+      this.masterGain.gain.linearRampToValueAtTime(isMuted ? 0 : 0.85, t + 0.05);
+    }
+
+    updateAnalysis() {
+      if (this.analyser) {
+        this.analyser.getByteFrequencyData(this.freqData);
+      } else {
+        // En mode silencieux ou sans audio, simulation harmonique
+        const t = state.currentTime;
+        for (let i = 0; i < this.freqData.length; i++) {
+          const val = Math.sin(t * 12 + i * 0.4) * 0.5 + 0.5;
+          this.freqData[i] = Math.floor(val * 160);
+        }
+      }
+    }
+
+    getBassIntensity() {
+      if (!this.freqData) return 0;
+      let sum = 0;
+      for (let i = 0; i < 4; i++) sum += this.freqData[i];
+      return sum / (4 * 255);
+    }
+
+    getHighIntensity() {
+      if (!this.freqData) return 0;
+      let sum = 0;
+      for (let i = 16; i < 28; i++) sum += this.freqData[i];
+      return sum / (12 * 255);
+    }
+
+    // --- INSTRUMENTS SYNTHÉTIQUES ---
+    playKick(t, volume = 1.0) {
+      if (!this.ctx || state.isAudioMuted) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      // Pitch drop 808
+      osc.frequency.setValueAtTime(160, t);
+      osc.frequency.exponentialRampToValueAtTime(38, t + 0.18);
+
+      gain.gain.setValueAtTime(volume, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+
+      osc.connect(gain);
+      gain.connect(this.compressor);
+
+      osc.start(t);
+      osc.stop(t + 0.28);
+    }
+
+    playSnare(t, volume = 0.8) {
+      if (!this.ctx || state.isAudioMuted) return;
+      // Corps tonal
+      const osc = this.ctx.createOscillator();
+      const oscGain = this.ctx.createGain();
+      osc.frequency.setValueAtTime(220, t);
+      osc.frequency.exponentialRampToValueAtTime(90, t + 0.12);
+      oscGain.gain.setValueAtTime(volume * 0.6, t);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+      osc.connect(oscGain);
+      oscGain.connect(this.compressor);
+      osc.start(t);
+      osc.stop(t + 0.14);
+
+      // Bruit blanc filtré
+      const bufferSize = Math.floor(this.ctx.sampleRate * 0.18);
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.setValueAtTime(900, t);
+
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(volume * 0.7, t);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(this.compressor);
+
+      noise.start(t);
+      noise.stop(t + 0.18);
+    }
+
+    playHiHat(t, isOpen = false) {
+      if (!this.ctx || state.isAudioMuted) return;
+      const dur = isOpen ? 0.22 : 0.045;
+      const bufferSize = Math.floor(this.ctx.sampleRate * dur);
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.setValueAtTime(7500, t);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(isOpen ? 0.35 : 0.2, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.compressor);
+
+      noise.start(t);
+      noise.stop(t + dur);
+    }
+
+    playBass(t, freq, dur = 0.25) {
+      if (!this.ctx || state.isAudioMuted) return;
+      const osc1 = this.ctx.createOscillator();
+      const osc2 = this.ctx.createOscillator();
+      osc1.type = 'sawtooth';
+      osc2.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(freq, t);
+      osc2.frequency.setValueAtTime(freq * 1.008, t); // Léger detune
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(900, t);
+      filter.frequency.exponentialRampToValueAtTime(280, t + dur);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.45, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+      osc1.connect(filter);
+      osc2.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.compressor);
+
+      osc1.start(t);
+      osc2.start(t);
+      osc1.stop(t + dur);
+      osc2.stop(t + dur);
+    }
+
+    playLead(t, freq, dur = 0.2) {
+      if (!this.ctx || state.isAudioMuted) return;
+      const osc = this.ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, t);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.28, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+      osc.connect(gain);
+      gain.connect(this.compressor);
+
+      osc.start(t);
+      osc.stop(t + dur);
+    }
+
+    playImpact(t) {
+      if (!this.ctx || state.isAudioMuted) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.frequency.setValueAtTime(90, t);
+      osc.frequency.exponentialRampToValueAtTime(24, t + 1.8);
+
+      gain.gain.setValueAtTime(0.9, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 2.0);
+
+      osc.connect(gain);
+      gain.connect(this.compressor);
+
+      osc.start(t);
+      osc.stop(t + 2.0);
+    }
+
+    playRiser(t, duration = 1.8) {
+      if (!this.ctx || state.isAudioMuted) return;
+      const osc = this.ctx.createOscillator();
+      const filter = this.ctx.createBiquadFilter();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(140, t);
+      osc.frequency.exponentialRampToValueAtTime(1200, t + duration);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(400, t);
+      filter.frequency.exponentialRampToValueAtTime(5000, t + duration);
+
+      gain.gain.setValueAtTime(0.01, t);
+      gain.gain.linearRampToValueAtTime(0.35, t + duration - 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.compressor);
+
+      osc.start(t);
+      osc.stop(t + duration);
+    }
+
+    // Ordonnancement temporel calé sur les fractions de secondes
+    scheduleTimelineEvents(prevTime, currTime) {
+      if (!this.isInitialized || state.isAudioMuted) return;
+      const ctxTime = this.ctx.currentTime;
+
+      // Déclenchement ponctuel d'impacts sur transitions majeures
+      if (prevTime < 1.8 && currTime >= 1.8) {
+        this.playImpact(ctxTime);
+        this.playKick(ctxTime, 1.0);
+      }
+      if (prevTime < 3.2 && currTime >= 3.2) {
+        this.playImpact(ctxTime);
+      }
+      if (prevTime < 7.5 && currTime >= 7.5) {
+        this.playImpact(ctxTime);
+      }
+      if (prevTime < 10.5 && currTime >= 10.5) {
+        this.playRiser(ctxTime, 1.5);
+      }
+      if (prevTime < 12.0 && currTime >= 12.0) {
+        this.playImpact(ctxTime);
+        this.playKick(ctxTime, 1.1);
+      }
+      if (prevTime < 16.8 && currTime >= 16.8) {
+        this.playImpact(ctxTime);
+        this.playLead(ctxTime, 880, 1.2);
+        this.playLead(ctxTime, 1108, 1.2);
+        this.playLead(ctxTime, 1318, 1.2);
+      }
+
+      // Grille rythmique 130 BPM
+      const currentBeat = Math.floor(currTime / BEAT_DURATION);
+      if (currentBeat !== this.lastScheduledBeat && currentBeat >= 0) {
+        this.lastScheduledBeat = currentBeat;
+
+        // Act 1 (1.8s à 3.2s)
+        if (currTime >= 1.8 && currTime < 3.2) {
+          const subBeat = currentBeat % 4;
+          if (subBeat === 0 || subBeat === 2) this.playKick(ctxTime, 0.9);
+          if (subBeat === 1 || subBeat === 3) this.playSnare(ctxTime, 0.7);
+          this.playHiHat(ctxTime, false);
+        }
+
+        // Act 2 : Tesseract Groove (3.2s à 7.5s)
+        else if (currTime >= 3.2 && currTime < 7.5) {
+          const step = currentBeat % 8;
+          if (step === 0 || step === 4) this.playKick(ctxTime, 1.0);
+          if (step === 2 || step === 6) this.playSnare(ctxTime, 0.85);
+          this.playHiHat(ctxTime, step % 2 === 1);
+
+          // Ligne de basse A minor
+          const bassNotes = [110, 110, 130.8, 110, 146.8, 130.8, 98, 123.4];
+          this.playBass(ctxTime, bassNotes[step] / 2, BEAT_DURATION * 0.9);
+
+          // Arpège mélodique futuriste
+          const leadNotes = [440, 523.25, 659.25, 880, 783.99, 659.25, 587.33, 523.25];
+          this.playLead(ctxTime, leadNotes[step], 0.18);
+        }
+
+        // Act 3 : Cosmos Ambient & Riser (7.5s à 12.0s)
+        else if (currTime >= 7.5 && currTime < 12.0) {
+          const step = currentBeat % 4;
+          this.playHiHat(ctxTime, false);
+          if (currTime > 9.5 && step % 2 === 0) {
+            this.playSnare(ctxTime, 0.5 + (currTime - 9.5) * 0.2);
+          }
+          const padNotes = [329.63, 392.0, 440.0, 493.88];
+          this.playLead(ctxTime, padNotes[step], 0.4);
+        }
+
+        // Act 4 : Warp High-Energy Climax (12.0s à 16.8s)
+        else if (currTime >= 12.0 && currTime < 16.8) {
+          const step = currentBeat % 4;
+          // Four on the floor + syncopes
+          this.playKick(ctxTime, 1.1);
+          if (step === 1 || step === 3) this.playSnare(ctxTime, 0.9);
+          this.playHiHat(ctxTime, true);
+
+          // Bass Reese agressive
+          const reeseNotes = [110, 123.47, 130.81, 98.0];
+          this.playBass(ctxTime, reeseNotes[step] / 2, BEAT_DURATION * 0.95);
+
+          // Lead synthwave syncopé
+          const leadClimax = [880, 1046.5, 1318.5, 1174.6];
+          this.playLead(ctxTime, leadClimax[step], 0.22);
+        }
+
+        // Act 5 : Finale Monolithe (16.8s à 20.0s)
+        else if (currTime >= 16.8 && currTime <= 20.0) {
+          const step = currentBeat % 4;
+          if (step === 0 && currTime < 19.0) {
+            this.playLead(ctxTime, 554.37, 0.8);
+            this.playLead(ctxTime, 659.25, 0.8);
+          }
+        }
+      }
+    }
+  }
+
+  const audio = new AudioEngine();
+
+  // --------------------------------------------------------------------------
+  // 3. FONCTIONS MATHÉMATIQUES & EASING D'ANIMATION
+  // --------------------------------------------------------------------------
+  const MathUtils = {
+    clamp(v, min, max) { return Math.max(min, Math.min(max, v)); },
+    lerp(a, b, t) { return a + (b - a) * t; },
+    map(v, inMin, inMax, outMin, outMax) {
+      const t = MathUtils.clamp((v - inMin) / (inMax - inMin), 0, 1);
+      return outMin + (outMax - outMin) * t;
+    },
+    // Courbes de Bézier / Easing
+    easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); },
+    easeInOutCubic(t) {
+      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    },
+    easeOutExpo(t) { return t === 1 ? 1 : 1 - Math.pow(2, -10 * t); },
+    easeOutBack(t, s = 1.70158) {
+      return 1 + (s + 1) * Math.pow(t - 1, 3) + s * Math.pow(t - 1, 2);
+    },
+    easeOutElastic(t) {
+      const c4 = (2 * Math.PI) / 3;
+      return t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1;
+    }
+  };
+
+  // --------------------------------------------------------------------------
+  // 4. MOTEUR PARTICULAIRE & 4D TESSERACT
+  // --------------------------------------------------------------------------
+
+  // --- 4D TESSERACT HYPERCUBE ---
+  class Tesseract4D {
+    constructor() {
+      // 16 sommets dans R4 : (+-1, +-1, +-1, +-1)
+      this.vertices = [];
+      for (let i = 0; i < 16; i++) {
+        this.vertices.push([
+          (i & 1) ? 1 : -1,
+          (i & 2) ? 1 : -1,
+          (i & 4) ? 1 : -1,
+          (i & 8) ? 1 : -1
+        ]);
+      }
+
+      // 32 arêtes reliant les sommets distants d'exactement 1 bit
+      this.edges = [];
+      for (let i = 0; i < 16; i++) {
+        for (let j = i + 1; j < 16; j++) {
+          const diff = i ^ j;
+          if (diff === 1 || diff === 2 || diff === 4 || diff === 8) {
+            this.edges.push([i, j]);
+          }
+        }
+      }
+    }
+
+    render(ctx, time, cx, cy, fov, mouseTilt) {
+      // Rotations 4D simultanées sur 3 plans orthogonaux
+      const aXW = time * 1.1;
+      const aYZ = time * 0.85;
+      const aXZ = time * 0.65;
+
+      const cosXW = Math.cos(aXW), sinXW = Math.sin(aXW);
+      const cosYZ = Math.cos(aYZ), sinYZ = Math.sin(aYZ);
+      const cosXZ = Math.cos(aXZ), sinXZ = Math.sin(aXZ);
+
+      const d4 = 3.0 + Math.sin(time * 1.6) * 0.25;
+      const projected3D = [];
+
+      for (let i = 0; i < 16; i++) {
+        const v = this.vertices[i];
+        let x = v[0], y = v[1], z = v[2], w = v[3];
+
+        // Rotation plan XW
+        const x1 = x * cosXW - w * sinXW;
+        const w1 = x * sinXW + w * cosXW;
+
+        // Rotation plan YZ
+        const y2 = y * cosYZ - z * sinYZ;
+        const z2 = y * sinYZ + z * cosYZ;
+
+        // Rotation plan XZ
+        const x3 = x1 * cosXZ - z2 * sinXZ;
+        const z3 = x1 * sinXZ + z2 * cosXZ;
+
+        // Projection stéréographique 4D -> 3D bornée
+        const factor4D = 1 / Math.max(1.2, d4 - w1);
+        projected3D.push([x3 * factor4D, y2 * factor4D, z3 * factor4D]);
+      }
+
+      // Projection 3D -> 2D avec parallaxe souris
+      const pts2D = [];
+      const camDist = 3.4;
+      const cosPitch = Math.cos(mouseTilt.y), sinPitch = Math.sin(mouseTilt.y);
+      const cosYaw = Math.cos(mouseTilt.x), sinYaw = Math.sin(mouseTilt.x);
+
+      for (let i = 0; i < 16; i++) {
+        const p = projected3D[i];
+        // Rotation Caméra Yaw (X) & Pitch (Y)
+        const rx = p[0] * cosYaw - p[2] * sinYaw;
+        const rz1 = p[0] * sinYaw + p[2] * cosYaw;
+        const ry = p[1] * cosPitch - rz1 * sinPitch;
+        const rz = p[1] * sinPitch + rz1 * cosPitch + camDist;
+
+        if (rz <= 0.2) {
+          pts2D.push(null);
+          continue;
+        }
+
+        const scale = fov / rz;
+        pts2D.push({
+          x: cx + rx * scale,
+          y: cy + ry * scale,
+          scale: scale,
+          z: rz
+        });
+      }
+
+      // Dessin des 32 arêtes luminescentes
+      ctx.save();
+      ctx.lineWidth = 2.2;
+      for (let i = 0; i < this.edges.length; i++) {
+        const e = this.edges[i];
+        const p1 = pts2D[e[0]], p2 = pts2D[e[1]];
+        if (!p1 || !p2) continue;
+
+        const avgZ = (p1.z + p2.z) * 0.5;
+        const alpha = MathUtils.clamp(1.4 / (avgZ - 1.2), 0.15, 0.95);
+
+        // Gradient laser néon cyan / magenta
+        const grad = ctx.createLinearGradient(p1.x, p1.y, p2.x, p2.y);
+        grad.addColorStop(0, `rgba(0, 240, 255, ${alpha})`);
+        grad.addColorStop(1, `rgba(255, 0, 127, ${alpha})`);
+
+        ctx.strokeStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+      }
+
+      // Dessin des 16 nœuds quantiques lumineux
+      for (let i = 0; i < 16; i++) {
+        const p = pts2D[i];
+        if (!p) continue;
+        const radius = Math.max(2.5, 7.0 * (p.scale / fov));
+
+        // Halo
+        const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * 3.5);
+        glow.addColorStop(0, 'rgba(0, 240, 255, 0.9)');
+        glow.addColorStop(0.4, 'rgba(255, 0, 127, 0.4)');
+        glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, radius * 3.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Cœur
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, radius * 0.7, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Anneaux gyroscopiques de cardan (Gimbal rings)
+      const ringRadii = [fov * 0.48, fov * 0.58, fov * 0.68];
+      const ringAngles = [time * 0.8, -time * 0.6, time * 0.4];
+      const ringColors = ['rgba(0, 240, 255, 0.45)', 'rgba(255, 0, 127, 0.35)', 'rgba(255, 190, 11, 0.3)'];
+
+      for (let r = 0; r < 3; r++) {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(ringAngles[r] + mouseTilt.x * 0.5);
+        ctx.scale(1.0, 0.45 + Math.sin(time + r) * 0.2);
+
+        ctx.strokeStyle = ringColors[r];
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([8, 12]);
+        ctx.beginPath();
+        ctx.arc(0, 0, ringRadii[r], 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Télémétrie graduée sur anneaux
+        ctx.setLineDash([]);
+        for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+          const tx = Math.cos(a) * ringRadii[r];
+          const ty = Math.sin(a) * ringRadii[r];
+          ctx.beginPath();
+          ctx.arc(tx, ty, 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = ringColors[r];
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      ctx.restore();
+    }
+  }
+
+  // --- SIMULATION PARTICULAIRE VORTEX FLUIDE (ACT 3) ---
+  class ParticleFluidSystem {
+    constructor(count = 2200) {
+      this.count = count;
+      this.particles = new Float32Array(count * 6); // x, y, z, vx, vy, vz
+      this.colors = new Uint8Array(count * 3);      // r, g, b
+      this.initParticles();
+    }
+
+    initParticles() {
+      for (let i = 0; i < this.count; i++) {
+        const idx = i * 6;
+        const rad = 250 + Math.random() * 500;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = (Math.random() - 0.5) * Math.PI;
+
+        this.particles[idx] = Math.cos(theta) * Math.cos(phi) * rad;
+        this.particles[idx + 1] = Math.sin(phi) * rad;
+        this.particles[idx + 2] = Math.sin(theta) * Math.cos(phi) * rad;
+
+        this.particles[idx + 3] = (Math.random() - 0.5) * 2;
+        this.particles[idx + 4] = (Math.random() - 0.5) * 2;
+        this.particles[idx + 5] = (Math.random() - 0.5) * 2;
+
+        const cIdx = i * 3;
+        const pal = Math.random();
+        if (pal < 0.35) { // Cyan
+          this.colors[cIdx] = 0; this.colors[cIdx + 1] = 240; this.colors[cIdx + 2] = 255;
+        } else if (pal < 0.7) { // Magenta
+          this.colors[cIdx] = 255; this.colors[cIdx + 1] = 0; this.colors[cIdx + 2] = 127;
+        } else { // Or
+          this.colors[cIdx] = 255; this.colors[cIdx + 1] = 190; this.colors[cIdx + 2] = 11;
+        }
+      }
+    }
+
+    render(ctx, time, cx, cy, fov, mouseTilt, bassReact) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      const camDist = 700;
+      const cosYaw = Math.cos(time * 0.35 + mouseTilt.x);
+      const sinYaw = Math.sin(time * 0.35 + mouseTilt.x);
+      const cosPitch = Math.cos(mouseTilt.y * 0.8);
+      const sinPitch = Math.sin(mouseTilt.y * 0.8);
+
+      const speedFactor = 1.0 + bassReact * 1.8;
+
+      for (let i = 0; i < this.count; i++) {
+        const idx = i * 6;
+        let px = this.particles[idx];
+        let py = this.particles[idx + 1];
+        let pz = this.particles[idx + 2];
+
+        // Champ vectoriel Curl-Noise simplifié (harmoniques trigonométriques couplées)
+        const fx = Math.sin(py * 0.005 + time) * 4.5 - Math.cos(pz * 0.005) * 3.5;
+        const fy = Math.sin(pz * 0.005 + time) * 4.5 - Math.cos(px * 0.005) * 3.5;
+        const fz = Math.sin(px * 0.005 + time) * 4.5 - Math.cos(py * 0.005) * 3.5;
+
+        // Force d'attraction vortex vers le centre
+        const dist = Math.sqrt(px * px + py * py + pz * pz) + 0.1;
+        const vortexAngle = Math.atan2(pz, px) + 0.02 * speedFactor;
+        const orbitR = Math.max(40, dist * 0.994 - (bassReact * 20));
+
+        px = Math.cos(vortexAngle) * orbitR + fx * 0.6;
+        py = py * 0.99 + fy * 0.8;
+        pz = Math.sin(vortexAngle) * orbitR + fz * 0.6;
+
+        this.particles[idx] = px;
+        this.particles[idx + 1] = py;
+        this.particles[idx + 2] = pz;
+
+        // Projection Caméra 3D
+        const rx = px * cosYaw - pz * sinYaw;
+        const rz1 = px * sinYaw + pz * cosYaw;
+        const ry = py * cosPitch - rz1 * sinPitch;
+        const rz = py * sinPitch + rz1 * cosPitch + camDist;
+
+        if (rz <= 20) continue;
+
+        const scale = fov / rz;
+        const screenX = cx + rx * scale;
+        const screenY = cy + ry * scale;
+
+        const size = Math.max(1.5, 4.0 * scale * (1.0 + bassReact));
+        const alpha = MathUtils.clamp(1.3 - rz / 1100, 0.15, 0.95);
+
+        const cIdx = i * 3;
+        const r = this.colors[cIdx], g = this.colors[cIdx+1], b = this.colors[cIdx+2];
+
+        // Ligne de vitesse / traînée lumineuse
+        const trailLen = 3.5 * scale * speedFactor;
+        ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.75})`;
+        ctx.lineWidth = Math.max(1.0, size * 0.65);
+        ctx.beginPath();
+        ctx.moveTo(screenX - fx * trailLen * 0.1, screenY - fy * trailLen * 0.1);
+        ctx.lineTo(screenX, screenY);
+        ctx.stroke();
+
+        // Point central éclatant
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(screenX, screenY, size * 0.65, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Rayons volumétriques de lumière centrale (God Rays)
+      const rayGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, fov * 0.7);
+      rayGlow.addColorStop(0, `rgba(0, 240, 255, ${0.4 + bassReact * 0.4})`);
+      rayGlow.addColorStop(0.3, `rgba(255, 0, 127, ${0.2 + bassReact * 0.2})`);
+      rayGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = rayGlow;
+      ctx.beginPath();
+      ctx.arc(cx, cy, fov * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // 5. GESTION DES SCÈNES DU SHOWREEL
+  // --------------------------------------------------------------------------
+  const tesseract = new Tesseract4D();
+  const particleSystem = new ParticleFluidSystem(2400);
+
+  // --- ACT 1 : TYPOGRAPHIE CINÉTIQUE & BOOT (0.0s - 3.2s) ---
+  function renderAct1(ctx, t, w, h, cx, cy) {
+    // 0.0 à 1.2s : Grille de cadrage & Télémétrie de boot
+    const progress = t / 3.2;
+
+    // Grille de fond subtile
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.08)';
+    ctx.lineWidth = 1;
+    const gridSize = 48;
+    for (let x = 0; x < w; x += gridSize) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    }
+    for (let y = 0; y < h; y += gridSize) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+
+    // Viseur télémétrique central
+    const reticleScale = MathUtils.easeOutBack(MathUtils.clamp(t / 0.8, 0, 1));
+    const rSize = 70 * reticleScale;
+    ctx.strokeStyle = '#00f0ff';
+    ctx.lineWidth = 1.5;
+
+    // Coins de cadrage
+    const len = 18;
+    ctx.beginPath();
+    // Haut gauche
+    ctx.moveTo(cx - rSize, cy - rSize + len); ctx.lineTo(cx - rSize, cy - rSize); ctx.lineTo(cx - rSize + len, cy - rSize);
+    // Haut droite
+    ctx.moveTo(cx + rSize - len, cy - rSize); ctx.lineTo(cx + rSize, cy - rSize); ctx.lineTo(cx + rSize, cy - rSize + len);
+    // Bas droite
+    ctx.moveTo(cx + rSize, cy + rSize - len); ctx.lineTo(cx + rSize, cy + rSize); ctx.lineTo(cx + rSize - len, cy + rSize);
+    // Bas gauche
+    ctx.moveTo(cx - rSize + len, cy + rSize); ctx.lineTo(cx - rSize, cy + rSize); ctx.lineTo(cx - rSize, cy + rSize - len);
+    ctx.stroke();
+
+    // Réticule circulaire en rotation
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(t * 1.5);
+    ctx.setLineDash([6, 10]);
+    ctx.beginPath();
+    ctx.arc(0, 0, rSize * 1.35, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // Textes techniques de boot (positionnés au-dessus du panneau de commande)
+    ctx.font = '11px Consolas, monospace';
+    ctx.fillStyle = 'rgba(0, 240, 255, 0.75)';
+    ctx.fillText(`SYS.INIT: ACTIVE // CLOCK: ${(t * 1000).toFixed(0)}MS`, 40, h - 135);
+    ctx.fillText(`MATRIX: AGY_2026 // FPS: 60.0 // BUFFER: 100%`, 40, h - 115);
+
+    // Courbe d'animation Bézier (Hommage au motion design)
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 190, 11, 0.25)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    const bStartX = cx - 240, bStartY = cy + 120;
+    const bEndX = cx + 240, bEndY = cy - 120;
+    const cp1x = cx - 80, cp1y = cy - 140;
+    const cp2x = cx + 80, cp2y = cy + 140;
+    ctx.moveTo(bStartX, bStartY);
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, bEndX, bEndY);
+    ctx.stroke();
+
+    // Poignées tangentes et losanges de clés d'animation
+    ctx.fillStyle = '#ffbe0b';
+    ctx.fillRect(bStartX - 4, bStartY - 4, 8, 8);
+    ctx.fillRect(bEndX - 4, bEndY - 4, 8, 8);
+    ctx.restore();
+
+    // 0.8s à 1.8s : "CREATIVE TECHNOLOGIST" découpé
+    if (t >= 0.7 && t < 1.8) {
+      const subT = (t - 0.7) / 1.1;
+      const ease = MathUtils.easeOutExpo(subT);
+
+      const fontSize = Math.min(w * 0.085, 76);
+      ctx.font = `900 ${fontSize}px "Arial Black", -apple-system, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Décalage horizontal par bandes (Slicing effect)
+      const numSlices = 6;
+      const sliceH = (fontSize * 1.2) / numSlices;
+      const startY = cy - (fontSize * 0.6);
+
+      for (let i = 0; i < numSlices; i++) {
+        const offsetDir = i % 2 === 0 ? 1 : -1;
+        const slideOffset = (1 - ease) * 450 * offsetDir;
+        const yTop = startY + i * sliceH;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, yTop, w, sliceH);
+        ctx.clip();
+
+        // Aberration chromatique sur les bords tranchés
+        ctx.fillStyle = 'rgba(255, 0, 127, 0.8)';
+        ctx.fillText('CREATIVE MOTION', cx + slideOffset - 4, cy - 20);
+
+        ctx.fillStyle = 'rgba(0, 240, 255, 0.8)';
+        ctx.fillText('CREATIVE MOTION', cx + slideOffset + 4, cy - 20);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('CREATIVE MOTION', cx + slideOffset, cy - 20);
+        ctx.restore();
+      }
+
+      ctx.font = '700 16px Consolas, monospace';
+      ctx.fillStyle = '#ffbe0b';
+      ctx.letterSpacing = '6px';
+      ctx.fillText('DIRECTION ARTISTIQUE & CODE TEMPS RÉEL', cx, cy + fontSize * 0.7);
+    }
+
+    // 1.8s à 3.2s : Explosion cinétique "ANTIGRAVITY"
+    if (t >= 1.8) {
+      const subT = (t - 1.8) / 1.4;
+      const scaleEase = MathUtils.easeOutElastic(MathUtils.clamp(subT * 1.3, 0, 1));
+      const fontSize = Math.min(w * 0.12, 110) * scaleEase;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+
+      // Lignes de vitesse diagonales
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.lineWidth = 2;
+      for (let l = -3; l <= 3; l++) {
+        const lx = l * 120 + ((t * 800) % 240);
+        ctx.beginPath();
+        ctx.moveTo(lx - 200, -h * 0.5);
+        ctx.lineTo(lx + 200, h * 0.5);
+        ctx.stroke();
+      }
+
+      // Texte monumental avec ombre néon
+      ctx.font = `900 ${fontSize}px "Arial Black", Impact, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Ombre portée éclatante
+      ctx.fillStyle = 'rgba(0, 240, 255, 0.35)';
+      ctx.fillText('ANTIGRAVITY', -6, -4);
+      ctx.fillStyle = 'rgba(255, 0, 127, 0.35)';
+      ctx.fillText('ANTIGRAVITY', 6, 4);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('ANTIGRAVITY', 0, 0);
+
+      // Boîte d'encadrement télémétrique correctement dimensionnée
+      const textMetrics = ctx.measureText('ANTIGRAVITY');
+      const boxW = textMetrics.width + 56;
+      const boxH = fontSize * 1.3;
+      ctx.strokeStyle = 'rgba(0, 240, 255, 0.85)';
+      ctx.lineWidth = 1.8;
+      ctx.strokeRect(-boxW * 0.5, -boxH * 0.5, boxW, boxH);
+
+      // Repères d'angle professionnels [ + ]
+      const cSize = 12;
+      ctx.strokeStyle = '#ff007f';
+      ctx.lineWidth = 2.5;
+      // Haut gauche
+      ctx.beginPath(); ctx.moveTo(-boxW*0.5, -boxH*0.5 + cSize); ctx.lineTo(-boxW*0.5, -boxH*0.5); ctx.lineTo(-boxW*0.5 + cSize, -boxH*0.5); ctx.stroke();
+      // Haut droite
+      ctx.beginPath(); ctx.moveTo(boxW*0.5 - cSize, -boxH*0.5); ctx.lineTo(boxW*0.5, -boxH*0.5); ctx.lineTo(boxW*0.5, -boxH*0.5 + cSize); ctx.stroke();
+      // Bas droite
+      ctx.beginPath(); ctx.moveTo(boxW*0.5, boxH*0.5 - cSize); ctx.lineTo(boxW*0.5, boxH*0.5); ctx.lineTo(boxW*0.5 - cSize, boxH*0.5); ctx.stroke();
+      // Bas gauche
+      ctx.beginPath(); ctx.moveTo(-boxW*0.5 + cSize, boxH*0.5); ctx.lineTo(-boxW*0.5, boxH*0.5); ctx.lineTo(-boxW*0.5, boxH*0.5 - cSize); ctx.stroke();
+
+      // Graduations de dimensions & Easing curve info
+      ctx.font = '11px Consolas, monospace';
+      ctx.fillStyle = '#00f0ff';
+      ctx.fillText(`BOX: ${boxW.toFixed(0)}x${boxH.toFixed(0)}px // EASING: ELASTIC_OUT // T: ${(t).toFixed(2)}s`, 0, boxH * 0.5 + 24);
+
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  // --- ACT 2 : TESSERACT 4D & GÉOMÉTRIE SACRÉE (3.2s - 7.5s) ---
+  function renderAct2(ctx, t, w, h, cx, cy) {
+    const actProg = (t - 3.2) / 4.3;
+    const fov = Math.min(w, h) * 0.72;
+
+    // Flash d'entrée
+    if (t < 3.6) {
+      const flash = (1 - (t - 3.2) / 0.4);
+      ctx.fillStyle = `rgba(0, 240, 255, ${flash * 0.5})`;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // Ondulations d'ondes gravitationnelles de fond
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 0, 127, 0.1)';
+    ctx.lineWidth = 1.2;
+    for (let i = 1; i <= 6; i++) {
+      const r = (i * 90 + t * 40) % (Math.max(w, h) * 0.8);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Rendu du Tesseract en 4D
+    tesseract.render(ctx, t, cx, cy, fov, state.mouse);
+
+    // Titrage discret haut de gamme
+    ctx.save();
+    ctx.font = '700 14px "Consolas", monospace';
+    ctx.letterSpacing = '4px';
+    ctx.fillStyle = '#00f0ff';
+    ctx.textAlign = 'center';
+    ctx.fillText('02 // PROJECTION TENSORIELLE 4D', cx, 80);
+
+    ctx.font = '11px monospace';
+    ctx.fillStyle = '#8a96aa';
+    ctx.letterSpacing = '2px';
+    ctx.fillText(`HYPERCUBE: 16 SOMMETS • 32 ARÊTES // STÉRÉOGRAPHIE R⁴ → R³ → R²`, cx, 102);
+    ctx.restore();
+  }
+
+  // --- ACT 3 : VORTEX FLUIDE PARTICULAIRE & COSMOS (7.5s - 12.0s) ---
+  function renderAct3(ctx, t, w, h, cx, cy) {
+    const actProg = (t - 7.5) / 4.5;
+    const fov = Math.min(w, h) * 0.65;
+    const bass = audio.getBassIntensity();
+
+    // Rendu de la simulation particulaire
+    particleSystem.render(ctx, t, cx, cy, fov, state.mouse, bass);
+
+    // HUD dynamique de nébuleuse
+    ctx.save();
+    ctx.font = '700 14px "Consolas", monospace';
+    ctx.letterSpacing = '4px';
+    ctx.fillStyle = '#ff007f';
+    ctx.textAlign = 'center';
+    ctx.fillText('03 // DYNAMIQUE DES FLUIDES & VORTEX PARTICULAIRE', cx, 80);
+
+    ctx.font = '11px monospace';
+    ctx.fillStyle = '#8a96aa';
+    ctx.letterSpacing = '2px';
+    ctx.fillText(`2500 AGENTS • TURBULENCE CURL-NOISE // AUDIO REACT: ${(bass * 100).toFixed(0)}%`, cx, 102);
+
+    // Bague de gravité interactive
+    ctx.strokeStyle = `rgba(0, 240, 255, ${0.3 + bass * 0.5})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 140 + bass * 80, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // --- ACT 4 : HYPER-TUNNEL & CYBERPUNK FUI COCKPIT (12.0s - 16.8s) ---
+  function renderAct4(ctx, t, w, h, cx, cy) {
+    const actProg = (t - 12.0) / 4.8;
+    const speed = t * 1400;
+    const bass = audio.getBassIntensity();
+
+    // Horizon fuyant 3D & grille de sol
+    ctx.save();
+    const vanishingY = cy - 20;
+
+    // Dégradé de ciel cybernétique
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, vanishingY);
+    skyGrad.addColorStop(0, '#060312');
+    skyGrad.addColorStop(1, '#1b0a2d');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, w, vanishingY);
+
+    // Soleil néon Synthwave à l'horizon
+    const sunR = Math.min(w, h) * 0.22;
+    const sunGrad = ctx.createLinearGradient(0, vanishingY - sunR, 0, vanishingY);
+    sunGrad.addColorStop(0, '#ffe600');
+    sunGrad.addColorStop(0.45, '#ff007f');
+    sunGrad.addColorStop(1, '#7000ff');
+
+    ctx.save();
+    ctx.fillStyle = sunGrad;
+    ctx.beginPath();
+    ctx.arc(cx, vanishingY, sunR, Math.PI, 0);
+    ctx.fill();
+
+    // Découpes horizontales rétro du soleil (Retro blinds)
+    ctx.fillStyle = '#060312';
+    for (let sl = 1; sl <= 6; sl++) {
+      const slY = vanishingY - (sl * (sunR / 7));
+      const slH = sl * 2.0;
+      ctx.fillRect(cx - sunR, slY, sunR * 2, slH);
+    }
+    ctx.restore();
+
+    // Traînées stellaires hyperspatiales dans le ciel
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.6)';
+    ctx.lineWidth = 1.8;
+    for (let s = 0; s < 30; s++) {
+      const sAngle = (s * 41.5) % (Math.PI * 2);
+      const sDist = ((s * 73 + speed * 0.8) % (w * 0.6)) + 40;
+      const sx1 = cx + Math.cos(sAngle) * (sDist * 0.85);
+      const sy1 = vanishingY + Math.sin(sAngle) * (sDist * 0.5);
+      const sx2 = cx + Math.cos(sAngle) * sDist;
+      const sy2 = vanishingY + Math.sin(sAngle) * (sDist * 0.65);
+      if (sy2 < vanishingY) {
+        ctx.beginPath();
+        ctx.moveTo(sx1, sy1);
+        ctx.lineTo(sx2, sy2);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    // Sol néon avec perspective
+    const floorGrad = ctx.createLinearGradient(0, vanishingY, 0, h);
+    floorGrad.addColorStop(0, '#100520');
+    floorGrad.addColorStop(1, '#030206');
+    ctx.fillStyle = floorGrad;
+    ctx.fillRect(0, vanishingY, w, h - vanishingY);
+
+    // Lignes de fuite perspective
+    ctx.strokeStyle = 'rgba(255, 0, 127, 0.4)';
+    ctx.lineWidth = 1.5;
+    for (let x = -w * 0.8; x <= w * 1.8; x += 110) {
+      ctx.beginPath();
+      ctx.moveTo(cx, vanishingY);
+      ctx.lineTo(x, h);
+      ctx.stroke();
+    }
+
+    // Lignes de grille transversales en accélération
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.6)';
+    for (let z = 1; z <= 24; z++) {
+      const zDepth = ((z * 80 - (speed % 80)) / 1920);
+      if (zDepth <= 0) continue;
+      const screenZ = Math.pow(zDepth, 2.5);
+      const lineY = vanishingY + screenZ * (h - vanishingY);
+      ctx.lineWidth = Math.max(0.8, screenZ * 3.5);
+      ctx.beginPath();
+      ctx.moveTo(0, lineY);
+      ctx.lineTo(w, lineY);
+      ctx.stroke();
+    }
+
+    // Ligne centrale lumineuse jaune de l'autoroute
+    ctx.save();
+    ctx.strokeStyle = '#ffe600';
+    ctx.lineWidth = 3.5;
+    for (let z = 1; z <= 14; z++) {
+      const z1 = ((z * 130 - (speed % 130)) / 1920);
+      const z2 = z1 + 0.035;
+      if (z1 <= 0.02) continue;
+      const y1 = vanishingY + Math.pow(z1, 2.5) * (h - vanishingY);
+      const y2 = vanishingY + Math.pow(z2, 2.5) * (h - vanishingY);
+      ctx.beginPath();
+      ctx.moveTo(cx, y1);
+      ctx.lineTo(cx, y2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Arches néon voûtées au-dessus du tunnel
+    for (let a = 1; a <= 7; a++) {
+      const aDepth = ((a * 260 - (speed % 260)) / 1920);
+      if (aDepth <= 0.04) continue;
+      const aScale = Math.pow(aDepth, 2.2);
+      const archW = w * 0.38 * aScale + 25;
+      const archH = (h * 0.65) * aScale;
+
+      ctx.save();
+      ctx.strokeStyle = (a % 2 === 0) ? '#ff007f' : '#00f0ff';
+      ctx.lineWidth = Math.max(1.5, aScale * 3.5);
+      ctx.beginPath();
+      ctx.ellipse(cx, vanishingY, archW, archH, 0, Math.PI, 0);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Monolithes cybernétiques défilant sur les côtés
+    for (let side of [-1, 1]) {
+      for (let b = 0; b < 4; b++) {
+        const bZ = ((b * 450 + 200 - (speed % 450)) / 1800);
+        if (bZ <= 0.05) continue;
+        const bScale = Math.pow(bZ, 2.2);
+        const bx = cx + side * (w * 0.28 + bScale * w * 0.35);
+        const by = vanishingY + bScale * (h - vanishingY);
+        const bw = 90 * bScale;
+        const bh = 340 * bScale;
+
+        ctx.fillStyle = 'rgba(8, 12, 28, 0.85)';
+        ctx.strokeStyle = '#00f0ff';
+        ctx.lineWidth = 1.5 * bScale;
+        ctx.fillRect(bx - bw * 0.5, by - bh, bw, bh);
+        ctx.strokeRect(bx - bw * 0.5, by - bh, bw, bh);
+
+        // Fenêtres lumineuses
+        ctx.fillStyle = 'rgba(255, 0, 127, 0.7)';
+        ctx.fillRect(bx - bw * 0.3, by - bh * 0.8, bw * 0.6, 4 * bScale);
+        ctx.fillRect(bx - bw * 0.3, by - bh * 0.5, bw * 0.6, 4 * bScale);
+      }
+    }
+
+    // --- FUI (FUTURISTIC USER INTERFACE) OVERLAY ---
+    // 1. Égaliseur audio FFT temps réel au bas de l'écran
+    const numBars = 32;
+    const barW = Math.min(18, (w * 0.5) / numBars);
+    const eqStartX = cx - (numBars * barW) * 0.5;
+    const eqBaseY = h - 110;
+
+    for (let b = 0; b < numBars; b++) {
+      const val = audio.freqData[b] || 0;
+      const barH = (val / 255) * 85 + 4;
+      const bx = eqStartX + b * barW;
+
+      const barGrad = ctx.createLinearGradient(0, eqBaseY, 0, eqBaseY - barH);
+      barGrad.addColorStop(0, '#00f0ff');
+      barGrad.addColorStop(1, '#ff007f');
+
+      ctx.fillStyle = barGrad;
+      ctx.fillRect(bx + 1, eqBaseY - barH, barW - 2, barH);
+
+      // Casquette de crête
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(bx + 1, eqBaseY - barH - 2, barW - 2, 2);
+    }
+
+    // 2. Horizon artificiel gyroscopique au centre
+    ctx.save();
+    ctx.translate(cx, cy - 60);
+    ctx.rotate(state.mouse.x * 0.4);
+
+    ctx.strokeStyle = '#00f0ff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-110, 0); ctx.lineTo(-35, 0);
+    ctx.moveTo(35, 0); ctx.lineTo(110, 0);
+    ctx.stroke();
+
+    // Réticule de visée hexagonal
+    const hexRadius = 40 + bass * 15;
+    ctx.beginPath();
+    for (let a = 0; a < 6; a++) {
+      const ang = (a * Math.PI) / 3;
+      const hx = Math.cos(ang) * hexRadius;
+      const hy = Math.sin(ang) * hexRadius;
+      if (a === 0) ctx.moveTo(hx, hy);
+      else ctx.lineTo(hx, hy);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = '#ffbe0b';
+    ctx.stroke();
+
+    ctx.font = '10px Consolas, monospace';
+    ctx.fillStyle = '#ffbe0b';
+    ctx.textAlign = 'center';
+    ctx.fillText('LOCK: TARGET_DELTA // 99.8%', 0, -50);
+    ctx.restore();
+
+    // 3. Tachymètre & Vitesse MACH
+    ctx.font = '12px Consolas, monospace';
+    ctx.fillStyle = '#00f0ff';
+    ctx.textAlign = 'left';
+    ctx.fillText(`WARP VELOCITY: ${(9200 + actProg * 1400).toFixed(0)} KM/H`, 40, cy - 30);
+    ctx.fillText(`WARP DRIVE: MACH 4.8 // G-FORCE: 5.4G`, 40, cy - 10);
+    ctx.fillText(`SHIELDS: 100% // VECTOR: NOMINAL`, 40, cy + 10);
+
+    ctx.restore();
+  }
+
+  // --- ACT 5 : LE MONOLITHE HERO & FINALE (16.8s - 20.0s) ---
+  function renderAct5(ctx, t, w, h, cx, cy) {
+    const actProg = (t - 16.8) / 3.2;
+    const ease = MathUtils.easeOutCubic(MathUtils.clamp(actProg, 0, 1));
+
+    // Décélération Matrix & Ambiance Crépusculaire
+    ctx.save();
+    const bgGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.75);
+    bgGrad.addColorStop(0, '#0c1224');
+    bgGrad.addColorStop(0.6, '#060812');
+    bgGrad.addColorStop(1, '#020306');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, w, h);
+
+    // Poussières d'étoiles flottantes en zéro gravité
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    for (let p = 0; p < 70; p++) {
+      const px = ((p * 97) % w);
+      const py = ((p * 131 + t * 15) % h);
+      const sz = ((p * 17) % 3) + 1;
+      ctx.fillRect(px, py, sz, sz);
+    }
+
+    // Le Logo Monumental "AGY" Sculpté en 3D
+    const logoScale = MathUtils.lerp(0.85, 1.05, ease);
+    ctx.save();
+    ctx.translate(cx, cy - 20);
+    ctx.scale(logoScale, logoScale);
+
+    // Effet d'extrusion 3D isométrique
+    const extrudeLayers = 14;
+    const fontSize = Math.min(w * 0.22, 170);
+    ctx.font = `900 ${fontSize}px "Arial Black", Impact, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Faces arrières extrudées (Ombre titane biseautée)
+    for (let layer = extrudeLayers; layer >= 1; layer--) {
+      const lx = layer * 1.5;
+      const ly = layer * 1.8;
+      ctx.fillStyle = `rgba(5, 14, 30, ${0.9 - layer * 0.05})`;
+      ctx.fillText('AGY', lx, ly);
+    }
+
+    // Face avant chromée avec biseau néon
+    const chromeGrad = ctx.createLinearGradient(-fontSize * 1.2, -fontSize, fontSize * 1.2, fontSize);
+    chromeGrad.addColorStop(0, '#ffffff');
+    chromeGrad.addColorStop(0.45, '#c8d8f0');
+    chromeGrad.addColorStop(0.5, '#4a6080');
+    chromeGrad.addColorStop(0.55, '#8da8d0');
+    chromeGrad.addColorStop(1, '#00f0ff');
+
+    ctx.fillStyle = chromeGrad;
+    ctx.fillText('AGY', 0, 0);
+
+    // Contour laser ultra-fin
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.8)';
+    ctx.lineWidth = 2.5;
+    ctx.strokeText('AGY', 0, 0);
+
+    // Éclat de lumière anamorphique glissant horizontalement (Lens flare sweep)
+    const flareX = MathUtils.lerp(-fontSize * 1.8, fontSize * 1.8, actProg);
+    const flareGrad = ctx.createRadialGradient(flareX, 0, 0, flareX, 0, 160);
+    flareGrad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+    flareGrad.addColorStop(0.2, 'rgba(0, 240, 255, 0.7)');
+    flareGrad.addColorStop(0.5, 'rgba(255, 0, 127, 0.3)');
+    flareGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = flareGrad;
+    ctx.beginPath();
+    ctx.ellipse(flareX, 0, 260, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.restore(); // Fin Logo
+
+    // Sous-titres cinématiques & Typographie suisse
+    ctx.textAlign = 'center';
+    ctx.font = '700 18px "Segoe UI", -apple-system, sans-serif';
+    ctx.letterSpacing = '10px';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('A N T I G R A V I T Y', cx + 5, cy + fontSize * 0.65);
+
+    ctx.font = '600 12px "Consolas", monospace';
+    ctx.letterSpacing = '4px';
+    ctx.fillStyle = '#00f0ff';
+    ctx.fillText('DIRECTION ARTISTIQUE // MOTION DESIGN // CODE CRÉATIF', cx, cy + fontSize * 0.65 + 32);
+
+    ctx.font = '500 11px "Consolas", monospace';
+    ctx.letterSpacing = '3px';
+    ctx.fillStyle = '#8a96aa';
+    ctx.fillText('SHOWREEL COMPLET • 20.00 SECONDES • 60 FPS READY', cx, cy + fontSize * 0.65 + 56);
+
+    ctx.restore();
+  }
+
+  // --------------------------------------------------------------------------
+  // 6. BOUCLE PRINCIPALE DE RENDU & POST-PROCESSING
+  // --------------------------------------------------------------------------
+  const canvas = document.getElementById('viewport');
+  const ctx = canvas.getContext('2d');
+
+  function resize() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    // RÈGLE OBLIGATOIRE : canvas.style.width/height en plus de canvas.width/height
+    canvas.width = Math.floor(w * state.dpr);
+    canvas.height = Math.floor(h * state.dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+
+    state.width = w;
+    state.height = h;
+    state.aspectRatio = w / h;
+
+    // Calcul de la taille du format anamorphique 2.39:1
+    updateLetterbox();
+  }
+
+  function updateLetterbox() {
+    const topBar = document.getElementById('letterbox-top');
+    const bottomBar = document.getElementById('letterbox-bottom');
+    if (!state.isScopeActive) {
+      topBar.style.height = '0px';
+      bottomBar.style.height = '0px';
+      return;
+    }
+    const targetAspect = 2.39;
+    const currentAspect = state.width / state.height;
+
+    if (currentAspect < targetAspect) {
+      // Écran plus haut que 2.39:1 -> bandes noires en haut et bas
+      const targetHeight = state.width / targetAspect;
+      const barH = Math.max(0, Math.floor((state.height - targetHeight) * 0.5));
+      topBar.style.height = barH + 'px';
+      bottomBar.style.height = barH + 'px';
+    } else {
+      topBar.style.height = '0px';
+      bottomBar.style.height = '0px';
+    }
+  }
+
+  // Horloge de synchronisation d'animation
+  let lastTimestamp = performance.now();
+
+  function tick(timestamp) {
+    const dt = Math.min((timestamp - lastTimestamp) / 1000, 0.1);
+    lastTimestamp = timestamp;
+
+    // Mise à jour de la timeline si en lecture
+    if (state.isPlaying) {
+      const prevTime = state.currentTime;
+      state.currentTime += dt * state.speed;
+
+      // Ordonnancement WebAudio
+      audio.scheduleTimelineEvents(prevTime, state.currentTime);
+
+      // Fin de la vidéo de 20 secondes
+      if (state.currentTime >= TOTAL_DURATION) {
+        state.currentTime = TOTAL_DURATION;
+        state.isPlaying = false;
+        onShowreelComplete();
+      }
+    }
+
+    // Mise à jour de l'analyse spectrale audio
+    audio.updateAnalysis();
+
+    // Amortissement fluide de la parallaxe souris
+    state.mouse.x = MathUtils.lerp(state.mouse.x, state.mouse.targetX, 0.08);
+    state.mouse.y = MathUtils.lerp(state.mouse.y, state.mouse.targetY, 0.08);
+
+    // Amortissement du shake caméra
+    state.shake = Math.max(0, state.shake - dt * 4.0);
+
+    // Rendu graphique de la frame courante
+    renderFrame();
+
+    // Mise à jour des éléments de l'interface
+    updateUI();
+
+    requestAnimationFrame(tick);
+  }
+
+  function renderFrame() {
+    const w = state.width;
+    const h = state.height;
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const t = state.currentTime;
+
+    ctx.save();
+    ctx.scale(state.dpr, state.dpr);
+
+    // Effet de secousse caméra sur les impacts forts
+    if (state.shake > 0.01) {
+      const shakeAmt = state.shake * 12;
+      const sx = (Math.random() - 0.5) * shakeAmt;
+      const sy = (Math.random() - 0.5) * shakeAmt;
+      ctx.translate(sx, sy);
+    }
+
+    // Effacement / Fond noir profond
+    ctx.fillStyle = '#05060b';
+    ctx.fillRect(0, 0, w, h);
+
+    // Routage vers l'acte temporel actif
+    if (t < 3.2) {
+      renderAct1(ctx, t, w, h, cx, cy);
+    } else if (t < 7.5) {
+      renderAct2(ctx, t, w, h, cx, cy);
+    } else if (t < 12.0) {
+      renderAct3(ctx, t, w, h, cx, cy);
+    } else if (t < 16.8) {
+      renderAct4(ctx, t, w, h, cx, cy);
+    } else {
+      renderAct5(ctx, t, w, h, cx, cy);
+    }
+
+    // Effet de vignette optique cinématique
+    const vignette = ctx.createRadialGradient(cx, cy, Math.min(w, h) * 0.35, cx, cy, Math.max(w, h) * 0.75);
+    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.65)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.restore();
+  }
+
+  // --------------------------------------------------------------------------
+  // 7. GESTION DE L'INTERFACE UTILISATEUR & CONTRÔLES
+  // --------------------------------------------------------------------------
+  const ui = {
+    playBtn: document.getElementById('btn-play'),
+    playIcon: document.getElementById('play-icon'),
+    playText: document.getElementById('play-text'),
+    restartBtn: document.getElementById('btn-restart'),
+    timelineProgress: document.getElementById('timeline-progress'),
+    timelineThumb: document.getElementById('timeline-thumb'),
+    timelineContainer: document.getElementById('timeline-container'),
+    timelineTooltip: document.getElementById('timeline-tooltip'),
+    timeCurr: document.getElementById('time-curr'),
+    actPill: document.getElementById('act-pill'),
+    audioBtn: document.getElementById('btn-audio'),
+    audioIcon: document.getElementById('audio-icon'),
+    audioText: document.getElementById('audio-text'),
+    scopeBtn: document.getElementById('btn-scope'),
+    fullscreenBtn: document.getElementById('btn-fullscreen'),
+    speedBtn: document.getElementById('btn-speed'),
+    modalWelcome: document.getElementById('modal-welcome'),
+    modalEnd: document.getElementById('modal-end'),
+    startReelBtn: document.getElementById('btn-start-reel'),
+    replayEndBtn: document.getElementById('btn-replay-end'),
+    inspectEndBtn: document.getElementById('btn-inspect-end'),
+    actChips: document.querySelectorAll('.act-chip')
+  };
+
+  function formatTimecode(sec) {
+    const s = Math.floor(sec);
+    const ms = Math.floor((sec - s) * 100);
+    const frames = Math.floor((sec - s) * 60);
+    const minStr = '00';
+    const secStr = s < 10 ? '0' + s : '' + s;
+    const frStr = frames < 10 ? '0' + frames : '' + frames;
+    return `${minStr}:${secStr}:${frStr}`;
+  }
+
+  function updateUI() {
+    const t = state.currentTime;
+    const progress = (t / TOTAL_DURATION) * 100;
+
+    // Timeline progress & curseur
+    ui.timelineProgress.style.width = progress + '%';
+    ui.timelineThumb.style.left = progress + '%';
+
+    // Compteur de temps
+    ui.timeCurr.textContent = formatTimecode(t);
+
+    // Détection de l'acte courant
+    let currentAct = ACTS[0];
+    for (let act of ACTS) {
+      if (t >= act.start && t < act.end) {
+        currentAct = act;
+        break;
+      }
+    }
+    if (t >= 20.0) currentAct = ACTS[ACTS.length - 1];
+
+    ui.actPill.textContent = currentAct.name;
+
+    // Mise à jour des pastilles d'actes
+    ui.actChips.forEach(chip => {
+      const chipTime = parseFloat(chip.getAttribute('data-time'));
+      if (Math.abs(chipTime - currentAct.start) < 0.1) {
+        chip.classList.add('current');
+      } else {
+        chip.classList.remove('current');
+      }
+    });
+
+    // Bouton Play / Pause
+    if (state.isPlaying) {
+      ui.playIcon.textContent = '❚❚';
+      ui.playText.textContent = 'PAUSE';
+    } else {
+      ui.playIcon.textContent = '▶';
+      ui.playText.textContent = 'LECTURE';
+    }
+  }
+
+  function togglePlay() {
+    audio.init();
+    audio.resume();
+
+    if (state.currentTime >= TOTAL_DURATION) {
+      state.currentTime = 0.0;
+      audio.lastScheduledBeat = -1;
+      ui.modalEnd.classList.add('hidden');
+    }
+
+    state.isPlaying = !state.isPlaying;
+  }
+
+  function seekTo(timeSec) {
+    audio.init();
+    audio.resume();
+    state.currentTime = MathUtils.clamp(timeSec, 0, TOTAL_DURATION);
+    audio.lastScheduledBeat = Math.floor(state.currentTime / BEAT_DURATION) - 1;
+    ui.modalEnd.classList.add('hidden');
+  }
+
+  function onShowreelComplete() {
+    ui.modalEnd.classList.remove('hidden');
+  }
+
+  // --------------------------------------------------------------------------
+  // 8. ÉCOUTEURS D'ÉVÉNEMENTS & INTERACTIONS
+  // --------------------------------------------------------------------------
+
+  // Démarrage initial depuis la modale
+  ui.startReelBtn.addEventListener('click', () => {
+    audio.init();
+    audio.resume();
+    ui.modalWelcome.classList.add('hidden');
+    state.currentTime = 0.0;
+    state.isPlaying = true;
+  });
+
+  ui.replayEndBtn.addEventListener('click', () => {
+    ui.modalEnd.classList.add('hidden');
+    seekTo(0.0);
+    state.isPlaying = true;
+  });
+
+  ui.inspectEndBtn.addEventListener('click', () => {
+    ui.modalEnd.classList.add('hidden');
+  });
+
+  // Boutons Play & Restart
+  ui.playBtn.addEventListener('click', togglePlay);
+  ui.restartBtn.addEventListener('click', () => {
+    seekTo(0.0);
+    state.isPlaying = true;
+  });
+
+  // Saut direct par clic sur les puces d'actes
+  ui.actChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      const targetTime = parseFloat(chip.getAttribute('data-time'));
+      seekTo(targetTime);
+      state.isPlaying = true;
+    });
+  });
+
+  // Contrôle du Son
+  ui.audioBtn.addEventListener('click', () => {
+    audio.init();
+    audio.resume();
+    state.isAudioMuted = !state.isAudioMuted;
+    audio.setMute(state.isAudioMuted);
+
+    if (state.isAudioMuted) {
+      ui.audioIcon.textContent = '🔇';
+      ui.audioText.textContent = 'MUTED';
+      ui.audioBtn.classList.add('active');
+    } else {
+      ui.audioIcon.textContent = '🔊';
+      ui.audioText.textContent = 'AUDIO ON';
+      ui.audioBtn.classList.remove('active');
+    }
+  });
+
+  // Format 2.39:1 CinemaScope
+  ui.scopeBtn.addEventListener('click', () => {
+    state.isScopeActive = !state.isScopeActive;
+    document.body.classList.toggle('scope-active', state.isScopeActive);
+    ui.scopeBtn.classList.toggle('active', state.isScopeActive);
+    updateLetterbox();
+  });
+
+  // Vitesse de lecture (0.5x, 1.0x, 2.0x)
+  ui.speedBtn.addEventListener('click', () => {
+    if (state.speed === 1.0) state.speed = 0.5;
+    else if (state.speed === 0.5) state.speed = 2.0;
+    else state.speed = 1.0;
+    ui.speedBtn.textContent = state.speed.toFixed(1) + 'x';
+  });
+
+  // Plein écran
+  ui.fullscreenBtn.addEventListener('click', () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  });
+
+  // Interaction Scrubber (Souris & Tactile)
+  function handleScrub(e) {
+    const rect = ui.timelineContainer.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const pos = MathUtils.clamp((clientX - rect.left) / rect.width, 0, 1);
+    seekTo(pos * TOTAL_DURATION);
+  }
+
+  ui.timelineContainer.addEventListener('mousedown', (e) => {
+    state.isDraggingScrubber = true;
+    handleScrub(e);
+  });
+
+  ui.timelineContainer.addEventListener('touchstart', (e) => {
+    state.isDraggingScrubber = true;
+    handleScrub(e);
+  }, { passive: true });
+
+  window.addEventListener('mousemove', (e) => {
+    if (state.isDraggingScrubber) {
+      handleScrub(e);
+    }
+
+    // Bulle de prévisualisation au survol
+    const rect = ui.timelineContainer.getBoundingClientRect();
+    if (e.clientY >= rect.top - 15 && e.clientY <= rect.bottom + 15) {
+      const pos = MathUtils.clamp((e.clientX - rect.left) / rect.width, 0, 1);
+      const previewTime = pos * TOTAL_DURATION;
+      ui.timelineTooltip.style.opacity = '1';
+      ui.timelineTooltip.style.left = (pos * 100) + '%';
+      ui.timelineTooltip.textContent = formatTimecode(previewTime);
+    } else {
+      ui.timelineTooltip.style.opacity = '0';
+    }
+
+    // Parallaxe 3D avec amortissement
+    state.mouse.targetX = (e.clientX / state.width - 0.5) * 1.2;
+    state.mouse.targetY = (e.clientY / state.height - 0.5) * 1.2;
+  });
+
+  window.addEventListener('mouseup', () => {
+    state.isDraggingScrubber = false;
+  });
+
+  window.addEventListener('touchend', () => {
+    state.isDraggingScrubber = false;
+  });
+
+  // Raccourcis clavier (Barre d'espace, R, M, F, Flèches)
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      togglePlay();
+    } else if (e.code === 'KeyR') {
+      seekTo(0.0);
+      state.isPlaying = true;
+    } else if (e.code === 'KeyM') {
+      ui.audioBtn.click();
+    } else if (e.code === 'KeyF') {
+      ui.fullscreenBtn.click();
+    } else if (e.code === 'ArrowLeft') {
+      seekTo(state.currentTime - 1.0);
+    } else if (e.code === 'ArrowRight') {
+      seekTo(state.currentTime + 1.0);
+    } else if (e.key >= '1' && e.key <= '5') {
+      const actIndex = parseInt(e.key) - 1;
+      seekTo(ACTS[actIndex].start);
+      state.isPlaying = true;
+    }
+  });
+
+  // Redimensionnement de la fenêtre
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+
+  // Prise en charge des paramètres d'URL (ex: ?t=7.5 pour ouvrir directement à un acte)
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('t')) {
+      const seekParam = parseFloat(urlParams.get('t'));
+      if (!isNaN(seekParam)) {
+        state.currentTime = MathUtils.clamp(seekParam, 0, TOTAL_DURATION);
+        ui.modalWelcome.classList.add('hidden');
+        if (urlParams.get('play') === '1') {
+          state.isPlaying = true;
+        }
+      }
+    }
+  } catch (e) {
+    // Environnements sans URLSearchParams
+  }
+
+  resize();
+  updateUI();
+  requestAnimationFrame(tick);
+
+  // Point d'accès pour les tests automatisés et le débogage
+  window.__agy = {
+    state,
+    audio,
+    seekTo,
+    togglePlay,
+    renderFrame,
+    updateUI
+  };
+
+})();
+</script>
+</body>
+</html>
