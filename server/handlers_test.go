@@ -124,6 +124,9 @@ func TestSecurityHeaders(t *testing.T) {
 			t.Errorf("en-tête de sécurité %s manquant", k)
 		}
 	}
+	if csp := rec.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "img-src 'self' data:") {
+		t.Errorf("CSP sans img-src data: : %q", csp)
+	}
 }
 
 // TestMuxMethodPatterns vérifie que le mux n'accepte que GET/HEAD.
